@@ -23,9 +23,11 @@ mock.module("../src/paths.js", () => ({
 
 const { ClaudeCodeController } = await import("../src/controller.js");
 const { createApi } = await import("../src/api/index.js");
-const { readInbox } = await import("../src/inbox.js");
+const { readInbox, writeInbox } = await import("../src/inbox.js");
 
-describe("createApi", () => {
+// ─── Pre-initialized controller mode ─────────────────────────────────────────
+
+describe("createApi (pre-initialized controller)", () => {
   let ctrl: InstanceType<typeof ClaudeCodeController>;
   let teamName: string;
   let app: ReturnType<typeof createApi>;
@@ -44,18 +46,19 @@ describe("createApi", () => {
     try {
       await ctrl.shutdown();
     } catch {
-      // Controller may already be shut down (e.g. error handling test)
+      // Controller may already be shut down
     }
   });
 
   // ─── Health ──────────────────────────────────────────────────────────
 
-  it("GET /health returns ok", async () => {
+  it("GET /health returns ok with session status", async () => {
     const res = await app.request("/health");
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("ok");
     expect(typeof body.uptime).toBe("number");
+    expect(body.session).toBe(true);
   });
 
   // ─── Session ─────────────────────────────────────────────────────────
@@ -96,7 +99,6 @@ describe("createApi", () => {
   });
 
   it("GET /agents/:name returns agent after it's registered", async () => {
-    // Register a member directly via team manager
     await ctrl.team.addMember({
       agentId: `worker1@${teamName}`,
       name: "worker1",
@@ -142,7 +144,6 @@ describe("createApi", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
 
-    // Verify message landed in inbox
     const inbox = await readInbox(teamName, "worker1");
     expect(inbox).toHaveLength(1);
     expect(inbox[0].text).toBe("Hello agent");
@@ -357,7 +358,6 @@ describe("createApi", () => {
     const res = await app.request("/tasks/1", { method: "DELETE" });
     expect(res.status).toBe(200);
 
-    // Should be gone now
     const res2 = await app.request("/tasks/1");
     expect(res2.status).toBe(404);
   });
@@ -372,11 +372,9 @@ describe("createApi", () => {
     });
     expect(res.status).toBe(200);
 
-    // Task should have owner set
     const task = await ctrl.tasks.get("1");
     expect(task.owner).toBe("worker1");
 
-    // Assignment message should be in inbox
     const inbox = await readInbox(teamName, "worker1");
     expect(inbox).toHaveLength(1);
     const parsed = JSON.parse(inbox[0].text);
@@ -432,7 +430,6 @@ describe("createApi", () => {
   // ─── Error Handling ──────────────────────────────────────────────────
 
   it("returns 500 on internal errors via error handler", async () => {
-    // Shut down the controller to trigger errors on operations
     await ctrl.shutdown();
 
     const res = await app.request("/agents/worker1/messages", {
@@ -443,5 +440,443 @@ describe("createApi", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBeTruthy();
+  });
+});
+
+// ─── Session init mode (lazy) ────────────────────────────────────────────────
+
+describe("createApi (session init mode)", () => {
+  let app: ReturnType<typeof createApi>;
+  let teamName: string;
+
+  beforeEach(() => {
+    teamName = `init-${randomUUID().slice(0, 8)}`;
+    app = createApi(); // No controller passed
+  });
+
+  afterEach(async () => {
+    try {
+      await app.request("/session/shutdown", { method: "POST" });
+    } catch {
+      // Already shut down or never initialized
+    }
+  });
+
+  it("GET /session returns not initialized before init", async () => {
+    const res = await app.request("/session");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.initialized).toBe(false);
+  });
+
+  it("GET /health shows session: false before init", async () => {
+    const res = await app.request("/health");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.session).toBe(false);
+  });
+
+  it("GET /agents returns 500 before init", async () => {
+    const res = await app.request("/agents");
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toContain("No active session");
+  });
+
+  it("POST /session/init creates a session with env", async () => {
+    const res = await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamName,
+        env: { MY_CUSTOM_VAR: "hello" },
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.initialized).toBe(true);
+    expect(body.teamName).toBe(teamName);
+  });
+
+  it("POST /session/init allows usage of API afterwards", async () => {
+    await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName }),
+    });
+
+    const res = await app.request("/agents");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([]);
+  });
+
+  it("POST /session/init can send messages after init", async () => {
+    await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName }),
+    });
+
+    const res = await app.request("/agents/worker1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hello from init mode" }),
+    });
+    expect(res.status).toBe(200);
+
+    const inbox = await readInbox(teamName, "worker1");
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0].text).toBe("Hello from init mode");
+  });
+
+  it("POST /session/init with empty body uses defaults", async () => {
+    const res = await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.initialized).toBe(true);
+    expect(body.teamName).toBeTruthy();
+  });
+
+  it("POST /session/init replaces existing session", async () => {
+    await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName }),
+    });
+
+    const teamName2 = `reinit-${randomUUID().slice(0, 8)}`;
+    const res2 = await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName: teamName2 }),
+    });
+    expect(res2.status).toBe(201);
+    const body2 = await res2.json();
+    expect(body2.teamName).toBe(teamName2);
+
+    const res3 = await app.request("/session");
+    const body3 = await res3.json();
+    expect(body3.teamName).toBe(teamName2);
+  });
+
+  it("POST /session/shutdown after init works", async () => {
+    await app.request("/session/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName }),
+    });
+
+    const res = await app.request("/session/shutdown", { method: "POST" });
+    expect(res.status).toBe(200);
+
+    const session = await app.request("/session");
+    const body = await session.json();
+    expect(body.initialized).toBe(false);
+  });
+});
+
+// ─── Actions endpoints ───────────────────────────────────────────────────────
+
+describe("createApi /actions", () => {
+  let ctrl: InstanceType<typeof ClaudeCodeController>;
+  let teamName: string;
+  let app: ReturnType<typeof createApi>;
+
+  beforeEach(async () => {
+    teamName = `act-${randomUUID().slice(0, 8)}`;
+    ctrl = new ClaudeCodeController({
+      teamName,
+      logLevel: "silent",
+    });
+    await ctrl.init();
+    app = createApi(ctrl);
+  });
+
+  afterEach(async () => {
+    try {
+      await ctrl.shutdown();
+    } catch {
+      // Already shut down
+    }
+  });
+
+  it("GET /actions returns empty state initially", async () => {
+    const res = await app.request("/actions");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pending).toBe(0);
+    expect(body.approvals).toEqual([]);
+    expect(body.unassignedTasks).toEqual([]);
+    expect(body.idleAgents).toEqual([]);
+  });
+
+  it("GET /actions includes unassigned tasks", async () => {
+    await ctrl.createTask({ subject: "Task A", description: "Unassigned" });
+    await ctrl.createTask({
+      subject: "Task B",
+      description: "Assigned",
+      owner: "worker1",
+    });
+
+    const res = await app.request("/actions");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.unassignedTasks).toHaveLength(1);
+    expect(body.unassignedTasks[0].subject).toBe("Task A");
+    expect(body.unassignedTasks[0].action).toBe("POST /tasks/1/assign");
+    expect(body.pending).toBe(1);
+  });
+
+  it("GET /actions excludes completed unassigned tasks", async () => {
+    const id = await ctrl.createTask({
+      subject: "Done task",
+      description: "Already done",
+    });
+    await ctrl.tasks.update(id, { status: "completed" });
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.unassignedTasks).toHaveLength(0);
+  });
+
+  it("GET /actions tracks plan approval requests", async () => {
+    const planMsg = JSON.stringify({
+      type: "plan_approval_request",
+      requestId: "plan-123",
+      from: "coder",
+      planContent: "Step 1: do stuff",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "coder",
+      text: planMsg,
+      timestamp: new Date().toISOString(),
+    });
+
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.approvals).toHaveLength(1);
+    expect(body.approvals[0].type).toBe("plan");
+    expect(body.approvals[0].agent).toBe("coder");
+    expect(body.approvals[0].requestId).toBe("plan-123");
+    expect(body.approvals[0].action).toBe(
+      "POST /agents/coder/approve-plan"
+    );
+    expect(body.pending).toBe(1);
+  });
+
+  it("GET /actions tracks permission requests", async () => {
+    const permMsg = JSON.stringify({
+      type: "permission_request",
+      requestId: "perm-456",
+      from: "worker1",
+      toolName: "Write",
+      description: "Write to /tmp/foo.txt",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: permMsg,
+      timestamp: new Date().toISOString(),
+    });
+
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.approvals).toHaveLength(1);
+    expect(body.approvals[0].type).toBe("permission");
+    expect(body.approvals[0].toolName).toBe("Write");
+    expect(body.approvals[0].action).toBe(
+      "POST /agents/worker1/approve-permission"
+    );
+  });
+
+  it("approve-plan resolves the approval from actions", async () => {
+    const planMsg = JSON.stringify({
+      type: "plan_approval_request",
+      requestId: "plan-resolve",
+      from: "coder",
+      planContent: "Plan content",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "coder",
+      text: planMsg,
+      timestamp: new Date().toISOString(),
+    });
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    let res = await app.request("/actions");
+    let body = await res.json();
+    expect(body.approvals).toHaveLength(1);
+
+    await app.request("/agents/coder/approve-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: "plan-resolve", approve: true }),
+    });
+
+    res = await app.request("/actions");
+    body = await res.json();
+    expect(body.approvals).toHaveLength(0);
+    expect(body.pending).toBe(0);
+  });
+
+  it("approve-permission resolves the approval from actions", async () => {
+    const permMsg = JSON.stringify({
+      type: "permission_request",
+      requestId: "perm-resolve",
+      from: "worker1",
+      toolName: "Bash",
+      description: "Run ls",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: permMsg,
+      timestamp: new Date().toISOString(),
+    });
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    await app.request("/agents/worker1/approve-permission", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId: "perm-resolve" }),
+    });
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.approvals).toHaveLength(0);
+  });
+
+  it("GET /actions tracks idle agents", async () => {
+    const idleMsg = JSON.stringify({
+      type: "idle_notification",
+      from: "worker1",
+      timestamp: new Date().toISOString(),
+      idleReason: "turn_ended",
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: idleMsg,
+      timestamp: new Date().toISOString(),
+    });
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.idleAgents).toHaveLength(1);
+    expect(body.idleAgents[0].name).toBe("worker1");
+    expect(body.idleAgents[0].action).toBe(
+      "POST /agents/worker1/messages"
+    );
+    expect(body.pending).toBe(1);
+  });
+
+  it("idle agent is cleared when it sends a message", async () => {
+    const idleMsg = JSON.stringify({
+      type: "idle_notification",
+      from: "worker1",
+      timestamp: new Date().toISOString(),
+      idleReason: "turn_ended",
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: idleMsg,
+      timestamp: new Date().toISOString(),
+    });
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: "I'm back!",
+      timestamp: new Date().toISOString(),
+    });
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.idleAgents).toHaveLength(0);
+  });
+
+  // ─── Sub-routes ──────────────────────────────────────────────────────
+
+  it("GET /actions/approvals returns only approvals", async () => {
+    const res = await app.request("/actions/approvals");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([]);
+  });
+
+  it("GET /actions/tasks returns only unassigned tasks", async () => {
+    await ctrl.createTask({ subject: "T", description: "D" });
+
+    const res = await app.request("/actions/tasks");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].subject).toBe("T");
+  });
+
+  it("GET /actions/idle-agents returns only idle agents", async () => {
+    const res = await app.request("/actions/idle-agents");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([]);
+  });
+
+  // ─── Aggregated pending count ────────────────────────────────────────
+
+  it("GET /actions aggregates pending count correctly", async () => {
+    await ctrl.createTask({ subject: "T", description: "D" });
+
+    const planMsg = JSON.stringify({
+      type: "plan_approval_request",
+      requestId: "plan-count",
+      from: "coder",
+      timestamp: new Date().toISOString(),
+    });
+    await writeInbox(teamName, "controller", {
+      from: "coder",
+      text: planMsg,
+      timestamp: new Date().toISOString(),
+    });
+
+    const idleMsg = JSON.stringify({
+      type: "idle_notification",
+      from: "worker1",
+      timestamp: new Date().toISOString(),
+      idleReason: "available",
+    });
+    await writeInbox(teamName, "controller", {
+      from: "worker1",
+      text: idleMsg,
+      timestamp: new Date().toISOString(),
+    });
+
+    // @ts-expect-error accessing private
+    await ctrl.poller.poll();
+
+    const res = await app.request("/actions");
+    const body = await res.json();
+    expect(body.pending).toBe(3);
+    expect(body.approvals).toHaveLength(1);
+    expect(body.unassignedTasks).toHaveLength(1);
+    expect(body.idleAgents).toHaveLength(1);
   });
 });

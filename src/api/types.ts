@@ -89,6 +89,23 @@ export interface HealthResponse {
   uptime: number;
 }
 
+// ─── Actions ─────────────────────────────────────────────────────────────────
+
+export interface UnassignedTask {
+  id: string;
+  subject: string;
+  description: string;
+  status: string;
+  action: string;
+}
+
+export interface ActionsResponse {
+  pending: number;
+  approvals: import("./action-tracker.js").PendingApproval[];
+  unassignedTasks: UnassignedTask[];
+  idleAgents: import("./action-tracker.js").IdleAgent[];
+}
+
 // ─── API Options ─────────────────────────────────────────────────────────────
 
 export interface CreateApiOptions {
