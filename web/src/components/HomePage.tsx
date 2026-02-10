@@ -176,6 +176,7 @@ export function HomePage() {
     }
   }, [gitRepoInfo]);
 
+
   const selectedModel = MODELS.find((m) => m.value === model) || MODELS[0];
   const selectedMode = MODES.find((m) => m.value === mode) || MODES[0];
   const dirLabel = cwd ? cwd.split("/").pop() || cwd : "Select folder";

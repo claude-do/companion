@@ -273,6 +273,7 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     return c.json({ ...result, git_ahead, git_behind });
   });
 
+
   // ─── Helper ─────────────────────────────────────────────────────────
 
   function cleanupWorktree(sessionId: string, force?: boolean): { cleaned?: boolean; dirty?: boolean; path?: string } | undefined {

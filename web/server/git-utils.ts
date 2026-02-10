@@ -294,6 +294,7 @@ export function gitPull(
   }
 }
 
+
 export function getBranchStatus(
   repoRoot: string,
   branchName: string,
