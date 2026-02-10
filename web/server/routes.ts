@@ -111,8 +111,8 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const id = c.req.param("id");
     await launcher.kill(id);
 
-    // Clean up worktree if no other sessions use it
-    const worktreeResult = cleanupWorktree(id);
+    // Clean up worktree if no other sessions use it (force: delete is destructive)
+    const worktreeResult = cleanupWorktree(id, true);
 
     launcher.removeSession(id);
     wsBridge.closeSession(id);
@@ -260,11 +260,12 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
   // ─── Helper ─────────────────────────────────────────────────────────
 
   function cleanupWorktree(sessionId: string, force?: boolean): { cleaned?: boolean; dirty?: boolean; path?: string } | undefined {
-    const mapping = worktreeTracker.removeBySession(sessionId);
+    const mapping = worktreeTracker.getBySession(sessionId);
     if (!mapping) return undefined;
 
     // Check if any other sessions still use this worktree
-    if (worktreeTracker.isWorktreeInUse(mapping.worktreePath)) {
+    if (worktreeTracker.isWorktreeInUse(mapping.worktreePath, sessionId)) {
+      worktreeTracker.removeBySession(sessionId);
       return { cleaned: false, path: mapping.worktreePath };
     }
 
@@ -272,11 +273,14 @@ export function createRoutes(launcher: CliLauncher, wsBridge: WsBridge, sessionS
     const dirty = gitUtils.isWorktreeDirty(mapping.worktreePath);
     if (dirty && !force) {
       console.log(`[routes] Worktree ${mapping.worktreePath} is dirty, not auto-removing`);
+      // Keep the mapping so the worktree remains trackable
       return { cleaned: false, dirty: true, path: mapping.worktreePath };
     }
 
     const result = gitUtils.removeWorktree(mapping.repoRoot, mapping.worktreePath, { force: dirty });
     if (result.removed) {
+      // Only remove the mapping after successful cleanup
+      worktreeTracker.removeBySession(sessionId);
       console.log(`[routes] ${dirty ? "Force-removed dirty" : "Auto-removed clean"} worktree ${mapping.worktreePath}`);
     }
     return { cleaned: result.removed, path: mapping.worktreePath };
