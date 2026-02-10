@@ -21,6 +21,7 @@ export function Sidebar() {
   const sessionStatus = useStore((s) => s.sessionStatus);
   const removeSession = useStore((s) => s.removeSession);
   const sessionNames = useStore((s) => s.sessionNames);
+  const recentlyRenamed = useStore((s) => s.recentlyRenamed);
   const pendingPermissions = useStore((s) => s.pendingPermissions);
 
   // Poll for SDK sessions on mount
@@ -35,7 +36,11 @@ export function Sidebar() {
           const store = useStore.getState();
           for (const s of list) {
             if (s.name && (!store.sessionNames.has(s.sessionId) || /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(store.sessionNames.get(s.sessionId)!))) {
+              const hadRandomName = store.sessionNames.has(s.sessionId) && /^[A-Z][a-z]+ [A-Z][a-z]+$/.test(store.sessionNames.get(s.sessionId)!);
               store.setSessionName(s.sessionId, s.name);
+              if (hadRandomName) {
+                store.markRecentlyRenamed(s.sessionId);
+              }
             }
           }
         }
@@ -268,7 +273,10 @@ export function Sidebar() {
                 className="text-[13px] font-medium flex-1 text-cc-fg bg-transparent border border-cc-border rounded-md px-1 py-0 outline-none focus:border-cc-primary/50 min-w-0"
               />
             ) : (
-              <span className="text-[13px] font-medium truncate flex-1 text-cc-fg">
+              <span
+                className={`text-[13px] font-medium truncate flex-1 text-cc-fg ${recentlyRenamed.has(s.id) ? "animate-name-appear" : ""}`}
+                onAnimationEnd={() => useStore.getState().clearRecentlyRenamed(s.id)}
+              >
                 {label}
               </span>
             )}
