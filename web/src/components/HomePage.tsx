@@ -251,11 +251,16 @@ export function HomePage() {
     setPullError("");
 
     // Branch freshness check: warn if behind remote
-    if (gitRepoInfo && worktreeBranch) {
-      const branchInfo = branches.find(b => b.name === worktreeBranch && !b.isRemote);
-      if (branchInfo && branchInfo.behind > 0) {
-        setPullPrompt({ behind: branchInfo.behind, branchName: worktreeBranch });
-        return; // Pause — user must choose pull/skip/cancel
+    // Only offer pull when the effective branch is the currently checked-out branch,
+    // since git pull operates on the checked-out branch
+    if (gitRepoInfo) {
+      const effectiveBranch = useWorktree ? worktreeBranch : gitRepoInfo.currentBranch;
+      if (effectiveBranch && effectiveBranch === gitRepoInfo.currentBranch) {
+        const branchInfo = branches.find(b => b.name === effectiveBranch && !b.isRemote);
+        if (branchInfo && branchInfo.behind > 0) {
+          setPullPrompt({ behind: branchInfo.behind, branchName: effectiveBranch });
+          return; // Pause — user must choose pull/skip/cancel
+        }
       }
     }
 
@@ -263,6 +268,11 @@ export function HomePage() {
   }
 
   async function doCreateSession(msg: string) {
+    if (!msg) {
+      setSending(false);
+      return;
+    }
+
     try {
       // Disconnect current session if any
       if (currentSessionId) {
@@ -337,6 +347,7 @@ export function HomePage() {
       if (!result.success) {
         setPullError(result.output || "Pull failed");
         setPulling(false);
+        setSending(false);
         return;
       }
 
