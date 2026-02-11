@@ -256,6 +256,61 @@ describe("POST /api/sessions/create", () => {
     );
   });
 
+  it("returns 500 and does not launch when fetch fails before create", async () => {
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    });
+    vi.mocked(gitUtils.gitFetch).mockReturnValueOnce({
+      success: false,
+      output: "network error",
+    });
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "main" }),
+    });
+
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json).toEqual({
+      error: "git fetch failed before session create: network error",
+    });
+    expect(gitUtils.gitPull).not.toHaveBeenCalled();
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 and does not launch when pull fails before create", async () => {
+    vi.mocked(gitUtils.getRepoInfo).mockReturnValue({
+      repoRoot: "/repo",
+      repoName: "my-repo",
+      currentBranch: "main",
+      defaultBranch: "main",
+      isWorktree: false,
+    });
+    vi.mocked(gitUtils.gitPull).mockReturnValueOnce({
+      success: false,
+      output: "non-fast-forward",
+    });
+
+    const res = await app.request("/api/sessions/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: "/repo", branch: "main" }),
+    });
+
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json).toEqual({
+      error: "git pull failed before session create: non-fast-forward",
+    });
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
   it("returns 500 when launch throws an error", async () => {
     launcher.launch.mockImplementation(() => {
       throw new Error("CLI binary not found");
