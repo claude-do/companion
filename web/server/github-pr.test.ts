@@ -257,6 +257,50 @@ describe("parseGraphQLResponse", () => {
     const result = mod.parseGraphQLResponse(makeGraphQLResponse({ reviewDecision: "" }))!;
     expect(result.reviewDecision).toBeNull();
   });
+
+  it("parses a merged PR correctly", () => {
+    const result = mod.parseGraphQLResponse(makeGraphQLResponse({
+      state: "MERGED",
+      reviewDecision: "APPROVED",
+    }))!;
+    expect(result).not.toBeNull();
+    expect(result.state).toBe("MERGED");
+    expect(result.reviewDecision).toBe("APPROVED");
+  });
+
+  it("filters out cross-repository (fork) PRs", () => {
+    const response = {
+      data: {
+        repository: {
+          pullRequests: {
+            nodes: [
+              { ...makeGraphQLResponse().data.repository.pullRequests.nodes[0], isCrossRepository: true, number: 100 },
+              { ...makeGraphQLResponse().data.repository.pullRequests.nodes[0], isCrossRepository: false, number: 200 },
+            ],
+          },
+        },
+      },
+    };
+    const result = mod.parseGraphQLResponse(response)!;
+    expect(result).not.toBeNull();
+    expect(result.number).toBe(200);
+  });
+
+  it("returns null when all PRs are cross-repository", () => {
+    const response = {
+      data: {
+        repository: {
+          pullRequests: {
+            nodes: [
+              { ...makeGraphQLResponse().data.repository.pullRequests.nodes[0], isCrossRepository: true },
+            ],
+          },
+        },
+      },
+    };
+    const result = mod.parseGraphQLResponse(response);
+    expect(result).toBeNull();
+  });
 });
 
 // ===========================================================================
