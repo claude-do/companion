@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -191,7 +191,7 @@ export function parseGraphQLResponse(data: unknown): GitHubPRInfo | null {
       return {
         name: node.context,
         status: node.state === "PENDING" ? "IN_PROGRESS" : "COMPLETED",
-        conclusion: node.state === "SUCCESS" ? "SUCCESS" : node.state === "FAILURE" ? "FAILURE" : null,
+        conclusion: node.state === "SUCCESS" ? "SUCCESS" : (node.state === "FAILURE" || node.state === "ERROR") ? "FAILURE" : null,
       };
     });
 
@@ -258,8 +258,9 @@ export async function fetchPRInfo(cwd: string, branch: string): Promise<GitHubPR
   if (!owner || !name) return null;
 
   try {
-    const result = execSync(
-      `gh api graphql -f query='${PR_QUERY}' -f owner='${owner}' -f name='${name}' -f branch='${branch}'`,
+    const result = execFileSync(
+      "gh",
+      ["api", "graphql", "-f", `query=${PR_QUERY}`, "-f", `owner=${owner}`, "-f", `name=${name}`, "-f", `branch=${branch}`],
       { cwd, stdio: "pipe", timeout: 15_000 },
     )
       .toString()

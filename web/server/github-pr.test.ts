@@ -5,9 +5,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 const mockExecSync = vi.hoisted(() => vi.fn());
+const mockExecFileSync = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execSync: mockExecSync,
+  execFileSync: mockExecFileSync,
 }));
 
 // ---------------------------------------------------------------------------
@@ -18,6 +20,7 @@ let mod: typeof import("./github-pr.js");
 beforeEach(async () => {
   vi.resetModules();
   mockExecSync.mockReset();
+  mockExecFileSync.mockReset();
   mod = await import("./github-pr.js");
 });
 
@@ -216,6 +219,31 @@ describe("parseGraphQLResponse", () => {
     expect(result.checksSummary.failure).toBe(0);
   });
 
+  it("treats StatusContext ERROR state as failure", () => {
+    const result = mod.parseGraphQLResponse(makeGraphQLResponse({
+      commits: {
+        nodes: [{
+          commit: {
+            statusCheckRollup: {
+              contexts: {
+                nodes: [
+                  { __typename: "StatusContext", context: "ci/build", state: "ERROR" },
+                ],
+              },
+            },
+          },
+        }],
+      },
+    }))!;
+    expect(result.checks[0]).toEqual({
+      name: "ci/build",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+    });
+    expect(result.checksSummary.failure).toBe(1);
+    expect(result.checksSummary.pending).toBe(0);
+  });
+
   it("counts CANCELLED and TIMED_OUT as failure", () => {
     const result = mod.parseGraphQLResponse(makeGraphQLResponse({
       commits: {
@@ -317,10 +345,11 @@ describe("fetchPRInfo", () => {
   });
 
   it("returns parsed PR info on success", async () => {
-    // Call sequence: which gh, gh repo view, gh api graphql
+    // which gh + gh repo view use execSync; gh api graphql uses execFileSync
     mockExecSync
       .mockReturnValueOnce("/opt/homebrew/bin/gh")       // which gh
-      .mockReturnValueOnce("The-Vibe-Company/companion") // gh repo view
+      .mockReturnValueOnce("The-Vibe-Company/companion"); // gh repo view
+    mockExecFileSync
       .mockReturnValueOnce(JSON.stringify(makeGraphQLResponse())); // gh api graphql
 
     const result = await mod.fetchPRInfo("/project", "feat/dark-mode");
@@ -341,7 +370,8 @@ describe("fetchPRInfo", () => {
   it("returns null when graphql query fails", async () => {
     mockExecSync
       .mockReturnValueOnce("/opt/homebrew/bin/gh")       // which gh
-      .mockReturnValueOnce("owner/repo")                 // gh repo view
+      .mockReturnValueOnce("owner/repo");                // gh repo view
+    mockExecFileSync
       .mockImplementationOnce(() => { throw new Error("timeout"); }); // gh api graphql
 
     const result = await mod.fetchPRInfo("/project", "main");
@@ -352,7 +382,8 @@ describe("fetchPRInfo", () => {
     const emptyResponse = { data: { repository: { pullRequests: { nodes: [] } } } };
     mockExecSync
       .mockReturnValueOnce("/opt/homebrew/bin/gh")
-      .mockReturnValueOnce("owner/repo")
+      .mockReturnValueOnce("owner/repo");
+    mockExecFileSync
       .mockReturnValueOnce(JSON.stringify(emptyResponse));
 
     const result = await mod.fetchPRInfo("/project", "no-pr-branch");
@@ -362,21 +393,24 @@ describe("fetchPRInfo", () => {
   it("caches results within TTL", async () => {
     mockExecSync
       .mockReturnValueOnce("/opt/homebrew/bin/gh")
-      .mockReturnValueOnce("owner/repo")
+      .mockReturnValueOnce("owner/repo");
+    mockExecFileSync
       .mockReturnValueOnce(JSON.stringify(makeGraphQLResponse()));
 
     const first = await mod.fetchPRInfo("/project", "feat/cached");
     const second = await mod.fetchPRInfo("/project", "feat/cached");
 
     expect(first).toEqual(second);
-    // which gh (1) + repo view (1) + graphql (1) = 3 total, not 5
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
+    // which gh (1) + repo view (1) = 2 execSync calls, graphql (1) = 1 execFileSync call
+    expect(mockExecSync).toHaveBeenCalledTimes(2);
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
   });
 
   it("returns null for malformed JSON response", async () => {
     mockExecSync
       .mockReturnValueOnce("/opt/homebrew/bin/gh")
-      .mockReturnValueOnce("owner/repo")
+      .mockReturnValueOnce("owner/repo");
+    mockExecFileSync
       .mockReturnValueOnce("NOT VALID JSON{{{");
 
     const result = await mod.fetchPRInfo("/project", "main");
