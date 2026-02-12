@@ -25,6 +25,7 @@ function makeItem(overrides: Partial<SessionItem> = {}): SessionItem {
     backendType: "claude",
     repoRoot: "",
     permCount: 0,
+    isContainer: false,
     ...overrides,
   };
 }

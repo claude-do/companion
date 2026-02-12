@@ -166,8 +166,21 @@ export function SessionItem({
                     {s.isWorktree && (
                       <span className="text-[8px] bg-cc-primary/10 text-cc-primary px-0.5 rounded shrink-0">wt</span>
                     )}
+                    {s.isContainer && (
+                      <span className="text-[8px] bg-blue-500/10 text-blue-500 px-0.5 rounded shrink-0" title={s.containerImage}>docker</span>
+                    )}
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Container badge (when no git branch to host it) */}
+            {s.isContainer && !s.gitBranch && (
+              <div className="flex items-center gap-1 mt-0.5 text-[10.5px] text-cc-muted leading-tight">
+                <svg viewBox="0 0 16 16" fill="currentColor" className="w-2.5 h-2.5 shrink-0 opacity-50">
+                  <path d="M1.5 8.5h2v2h-2zm0-3h2v2h-2zm3 0h2v2h-2zm0 3h2v2h-2zm3-3h2v2h-2zm0 3h2v2h-2zm3-6h2v2h-2zm0 3h2v2h-2zm0 3h2v2h-2zM14 6.5c-.4-.3-1.2-.4-1.8-.3-.1-.8-.6-1.5-1.2-1.9l-.2-.2-.2.2c-.5.3-.8.9-.8 1.5 0 .3.1.6.2.9-.3.1-.6.2-1 .3H.5v.3c0 2 1.1 3.8 2.8 4.7.8.4 1.8.6 2.7.6 2.8 0 5.1-1.3 6.3-3.9.7 0 1.5 0 2-.5.3-.3.4-.6.5-1l.1-.3-.3-.2c-.3-.2-.7-.3-1.1-.2z"/>
+                </svg>
+                <span className="text-[8px] bg-blue-500/10 text-blue-500 px-0.5 rounded shrink-0" title={s.containerImage}>docker</span>
               </div>
             )}
 

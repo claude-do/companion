@@ -1,0 +1,28 @@
+# Lightweight dev container for Claude Code sessions
+# Build: docker build -t companion-dev -f Dockerfile.dev .
+# Used by The Companion's containerized execution feature
+
+FROM node:22-slim
+
+# Install essential tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git \
+      curl \
+      ca-certificates \
+      openssh-client \
+      jq \
+      unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install Bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
+
+WORKDIR /workspace
+
+# Keep container alive (overridden by docker exec)
+CMD ["sleep", "infinity"]

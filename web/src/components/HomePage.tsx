@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store.js";
-import { api, type CompanionEnv, type GitRepoInfo, type GitBranchInfo, type BackendInfo } from "../api.js";
+import { api, type CompanionEnv, type GitRepoInfo, type GitBranchInfo, type BackendInfo, type ContainerStatus } from "../api.js";
 import { connectSession, waitForConnection, sendToSession } from "../ws.js";
 import { disconnectSession } from "../ws.js";
 import { generateUniqueSessionName } from "../utils/names.js";
@@ -77,6 +77,15 @@ export function HomePage() {
   const [branchFilter, setBranchFilter] = useState("");
   const [isNewBranch, setIsNewBranch] = useState(false);
 
+  // Container state
+  const [dockerStatus, setDockerStatus] = useState<ContainerStatus | null>(null);
+  const [useContainer, setUseContainer] = useState(false);
+  const [containerImage, setContainerImage] = useState("companion-dev:latest");
+  const [containerPorts, setContainerPorts] = useState("");
+  const [containerImages, setContainerImages] = useState<string[]>([]);
+  const [buildingImage, setBuildingImage] = useState(false);
+  const [buildError, setBuildError] = useState("");
+
   // Branch freshness check state
   const [pullPrompt, setPullPrompt] = useState<{ behind: number; branchName: string } | null>(null);
   const [pulling, setPulling] = useState(false);
@@ -108,6 +117,12 @@ export function HomePage() {
     }).catch(() => {});
     api.listEnvs().then(setEnvs).catch(() => {});
     api.getBackends().then(setBackends).catch(() => {});
+    api.getContainerStatus().then((status) => {
+      setDockerStatus(status);
+      if (status.available) {
+        api.getContainerImages().then(setContainerImages).catch(() => {});
+      }
+    }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When backend changes, reset model and mode to defaults
@@ -282,8 +297,11 @@ export function HomePage() {
         disconnectSession(currentSessionId);
       }
 
-      // Create session (with optional worktree)
+      // Create session (with optional worktree/container)
       const branchName = worktreeBranch.trim() || undefined;
+      const parsedPorts = useContainer
+        ? containerPorts.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => n > 0)
+        : undefined;
       const result = await api.createSession({
         model,
         permissionMode: mode,
@@ -294,6 +312,10 @@ export function HomePage() {
         useWorktree: useWorktree || undefined,
         backend,
         codexInternetAccess: backend === "codex" ? codexInternetAccess : undefined,
+        container: useContainer ? {
+          image: containerImage,
+          ports: parsedPorts,
+        } : undefined,
       });
       const sessionId = result.sessionId;
 
@@ -746,6 +768,24 @@ export function HomePage() {
             </button>
           )}
 
+          {/* Container toggle (only when Docker is available and backend is Claude) */}
+          {dockerStatus?.available && backend === "claude" && (
+            <button
+              onClick={() => setUseContainer(!useContainer)}
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors cursor-pointer ${
+                useContainer
+                  ? "bg-cc-primary/15 text-cc-primary font-medium"
+                  : "text-cc-muted hover:text-cc-fg hover:bg-cc-hover"
+              }`}
+              title="Run this session inside a Docker container"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5 opacity-70">
+                <path d="M1.5 8.5h2v2h-2zm0-3h2v2h-2zm3 0h2v2h-2zm0 3h2v2h-2zm3-3h2v2h-2zm0 3h2v2h-2zm3-6h2v2h-2zm0 3h2v2h-2zm0 3h2v2h-2zM14 6.5c-.4-.3-1.2-.4-1.8-.3-.1-.8-.6-1.5-1.2-1.9l-.2-.2-.2.2c-.5.3-.8.9-.8 1.5 0 .3.1.6.2.9-.3.1-.6.2-1 .3H.5v.3c0 2 1.1 3.8 2.8 4.7.8.4 1.8.6 2.7.6 2.8 0 5.1-1.3 6.3-3.9.7 0 1.5 0 2-.5.3-.3.4-.6.5-1l.1-.3-.3-.2c-.3-.2-.7-.3-1.1-.2z"/>
+              </svg>
+              <span>Container</span>
+            </button>
+          )}
+
           {/* Environment selector */}
           <div className="relative" ref={envDropdownRef}>
             <button
@@ -844,6 +884,81 @@ export function HomePage() {
             )}
           </div>
         </div>
+
+        {/* Container config panel */}
+        {useContainer && dockerStatus?.available && (
+          <div className="mt-2 px-3 py-2.5 rounded-[10px] bg-cc-card border border-cc-border/60">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Image selector */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider">Image</span>
+                <select
+                  value={containerImage}
+                  onChange={(e) => setContainerImage(e.target.value)}
+                  className="px-2 py-1 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code focus:outline-none focus:border-cc-primary/50"
+                >
+                  <option value="companion-dev:latest">companion-dev:latest</option>
+                  {containerImages
+                    .filter((img) => img !== "companion-dev:latest")
+                    .map((img) => (
+                      <option key={img} value={img}>{img}</option>
+                    ))
+                  }
+                </select>
+              </div>
+              {/* Build image button (shown when selected image is not available locally) */}
+              {!containerImages.includes(containerImage) && (
+                <button
+                  onClick={async () => {
+                    setBuildingImage(true);
+                    setBuildError("");
+                    try {
+                      await api.buildContainerImage({ tag: containerImage });
+                      const images = await api.getContainerImages();
+                      setContainerImages(images);
+                    } catch (e: unknown) {
+                      setBuildError(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setBuildingImage(false);
+                    }
+                  }}
+                  disabled={buildingImage}
+                  className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-cc-primary/15 text-cc-primary hover:bg-cc-primary/25 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {buildingImage ? (
+                    <>
+                      <span className="w-3 h-3 border-2 border-cc-primary/30 border-t-cc-primary rounded-full animate-spin" />
+                      Building...
+                    </>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                        <path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z" />
+                      </svg>
+                      Build image
+                    </>
+                  )}
+                </button>
+              )}
+              {/* Ports input */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-cc-muted uppercase tracking-wider">Ports</span>
+                <input
+                  type="text"
+                  value={containerPorts}
+                  onChange={(e) => setContainerPorts(e.target.value)}
+                  placeholder="3000, 8080"
+                  className="w-32 px-2 py-1 text-xs bg-cc-input-bg border border-cc-border rounded-md text-cc-fg font-mono-code placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
+                />
+              </div>
+            </div>
+            {buildError && (
+              <div className="mt-2 px-2 py-1.5 rounded-md bg-cc-error/10 border border-cc-error/20 text-[11px] text-cc-error font-mono-code whitespace-pre-wrap">
+                {buildError}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Branch behind remote warning */}
         {pullPrompt && (

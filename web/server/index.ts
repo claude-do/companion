@@ -15,6 +15,7 @@ import * as sessionNames from "./session-names.js";
 import { getSettings } from "./settings-manager.js";
 import { startPeriodicCheck, setServiceMode } from "./update-checker.js";
 import { isRunningAsService } from "./service.js";
+import { containerManager } from "./container-manager.js";
 import type { SocketData } from "./ws-bridge.js";
 import type { ServerWebSocket } from "bun";
 
@@ -185,3 +186,13 @@ if (starting.length > 0) {
     }
   }, RECONNECT_GRACE_MS);
 }
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+// Clean up Docker containers when the server exits to prevent orphaned containers.
+function handleShutdown(signal: string) {
+  console.log(`[server] Received ${signal}, cleaning up...`);
+  containerManager.cleanupAll();
+  process.exit(0);
+}
+process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+process.on("SIGINT", () => handleShutdown("SIGINT"));

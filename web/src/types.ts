@@ -5,9 +5,11 @@ import type {
   BrowserIncomingMessage,
   BrowserOutgoingMessage,
   BackendType,
+  ContainerSessionInfo,
+  ContainerPortMapping,
 } from "../server/session-types.js";
 
-export type { SessionState, PermissionRequest, ContentBlock, BrowserIncomingMessage, BrowserOutgoingMessage, BackendType };
+export type { SessionState, PermissionRequest, ContentBlock, BrowserIncomingMessage, BrowserOutgoingMessage, BackendType, ContainerSessionInfo, ContainerPortMapping };
 
 export interface ChatMessage {
   id: string;
@@ -53,4 +55,5 @@ export interface SdkSessionInfo {
   gitBehind?: number;
   totalLinesAdded?: number;
   totalLinesRemoved?: number;
+  containerInfo?: ContainerSessionInfo;
 }

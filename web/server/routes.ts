@@ -128,10 +128,20 @@ export function createRoutes(
       // If container mode requested, create and start the container
       let containerInfo: ContainerInfo | undefined;
       if (body.container && backend === "claude") {
+        const image = body.container.image || "companion-dev:latest";
+
+        // Validate image exists locally before attempting to create
+        if (!containerManager.imageExists(image)) {
+          return c.json(
+            { error: `Docker image "${image}" not found locally. Build it first or pull it with: docker pull ${image}` },
+            400,
+          );
+        }
+
         const cConfig: ContainerConfig = {
-          image: body.container.image || "companion-dev:latest",
+          image,
           ports: Array.isArray(body.container.ports)
-            ? body.container.ports.map(Number).filter((n: number) => n > 0)
+            ? body.container.ports.map(Number).filter((n: number) => n > 0 && n <= 65535)
             : [],
           volumes: body.container.volumes,
           env: body.container.env,
@@ -353,6 +363,24 @@ export function createRoutes(
   api.get("/containers/images", (c) => {
     const images = containerManager.listImages();
     return c.json(images);
+  });
+
+  api.post("/containers/build", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const tag = body.tag || "companion-dev:latest";
+    const dockerfilePath = body.dockerfilePath || join(process.cwd(), "Dockerfile.dev");
+
+    if (!existsSync(dockerfilePath)) {
+      return c.json({ error: `Dockerfile not found at ${dockerfilePath}` }, 400);
+    }
+
+    try {
+      const output = containerManager.buildImage(dockerfilePath, tag);
+      return c.json({ ok: true, tag, output });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // ─── Filesystem browsing ─────────────────────────────────────

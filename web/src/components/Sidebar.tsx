@@ -207,6 +207,8 @@ export function Sidebar() {
       backendType: bridgeState?.backend_type || sdkInfo?.backendType || "claude",
       repoRoot: bridgeState?.repo_root || sdkInfo?.repoRoot || "",
       permCount: pendingPermissions.get(id)?.size ?? 0,
+      isContainer: !!sdkInfo?.containerInfo || !!bridgeState?.container,
+      containerImage: sdkInfo?.containerInfo?.image || bridgeState?.container?.image,
     };
   }).sort((a, b) => b.createdAt - a.createdAt);
 

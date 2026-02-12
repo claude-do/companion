@@ -186,6 +186,22 @@ export type BrowserIncomingMessage =
   | { type: "message_history"; messages: BrowserIncomingMessage[] }
   | { type: "session_name_update"; name: string };
 
+// ─── Container Types ─────────────────────────────────────────────────────────
+
+export interface ContainerPortMapping {
+  containerPort: number;
+  hostPort: number;
+}
+
+export interface ContainerSessionInfo {
+  containerId: string;
+  name: string;
+  image: string;
+  portMappings: ContainerPortMapping[];
+  hostCwd: string;
+  containerCwd: string;
+}
+
 // ─── Session State ────────────────────────────────────────────────────────────
 
 export type BackendType = "claude" | "codex";
@@ -213,6 +229,7 @@ export interface SessionState {
   git_behind: number;
   total_lines_added: number;
   total_lines_removed: number;
+  container?: ContainerSessionInfo;
 }
 
 // ─── Permission Request ──────────────────────────────────────────────────────

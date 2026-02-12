@@ -4,8 +4,9 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import type { SessionStore } from "./session-store.js";
-import type { BackendType } from "./session-types.js";
+import type { BackendType, ContainerSessionInfo } from "./session-types.js";
 import { CodexAdapter } from "./codex-adapter.js";
+import { containerManager, type ContainerInfo } from "./container-manager.js";
 
 export interface SdkSessionInfo {
   sessionId: string;
@@ -45,6 +46,8 @@ export interface SdkSessionInfo {
   codexInternetAccess?: boolean;
   /** Sandbox mode selected for Codex sessions */
   codexSandbox?: "workspace-write" | "danger-full-access";
+  /** Container info when running in Docker */
+  containerInfo?: ContainerSessionInfo;
 }
 
 export interface LaunchOptions {
@@ -68,6 +71,8 @@ export interface LaunchOptions {
     actualBranch: string;
     worktreePath: string;
   };
+  /** Pre-resolved container info from the session creation flow */
+  containerInfo?: ContainerInfo;
 }
 
 /**
@@ -114,6 +119,14 @@ export class CliLauncher {
     let recovered = 0;
     for (const info of data) {
       if (this.sessions.has(info.sessionId)) continue;
+
+      // Restore container manager tracking for container sessions
+      if (info.containerInfo) {
+        containerManager.restoreContainer(
+          info.sessionId,
+          sessionContainerToContainerInfo(info.containerInfo),
+        );
+      }
 
       // Check if the process is still alive
       if (info.pid && info.state !== "exited") {
@@ -170,10 +183,27 @@ export class CliLauncher {
       info.actualBranch = options.worktreeInfo.actualBranch;
     }
 
+    // Store container metadata if provided
+    if (options.containerInfo) {
+      info.containerInfo = {
+        containerId: options.containerInfo.containerId,
+        name: options.containerInfo.name,
+        image: options.containerInfo.image,
+        portMappings: options.containerInfo.portMappings.map((p) => ({
+          containerPort: p.containerPort,
+          hostPort: p.hostPort,
+        })),
+        hostCwd: options.containerInfo.hostCwd,
+        containerCwd: options.containerInfo.containerCwd,
+      };
+    }
+
     this.sessions.set(sessionId, info);
 
     if (backendType === "codex") {
       this.spawnCodex(sessionId, info, options);
+    } else if (options.containerInfo) {
+      this.spawnCLIInContainer(sessionId, info, options);
     } else {
       this.spawnCLI(sessionId, info, options);
     }
@@ -214,6 +244,15 @@ export class CliLauncher {
         cwd: info.cwd,
         codexSandbox: info.codexSandbox,
         codexInternetAccess: info.codexInternetAccess,
+      });
+    } else if (info.containerInfo) {
+      // Container sessions must be relaunched inside the container
+      this.spawnCLIInContainer(sessionId, info, {
+        model: info.model,
+        permissionMode: info.permissionMode,
+        cwd: info.cwd,
+        resumeSessionId: info.cliSessionId,
+        containerInfo: sessionContainerToContainerInfo(info.containerInfo),
       });
     } else {
       this.spawnCLI(sessionId, info, {
@@ -325,6 +364,154 @@ export class CliLauncher {
     });
 
     this.persistState();
+  }
+
+  /**
+   * Spawn Claude Code CLI inside a Docker container via `docker exec`.
+   * The container must already be running (created by ContainerManager).
+   * The CLI connects back to the Companion server via host.docker.internal.
+   */
+  private spawnCLIInContainer(
+    sessionId: string,
+    info: SdkSessionInfo,
+    options: LaunchOptions & { resumeSessionId?: string },
+  ): void {
+    const container = options.containerInfo;
+    if (!container) {
+      throw new Error("containerInfo is required for spawnCLIInContainer");
+    }
+
+    // Inject container guardrails into the host-mounted workspace
+    // (which is volume-mapped into the container at /workspace)
+    this.injectContainerGuardrails(info.cwd, container);
+
+    // The SDK URL must use host.docker.internal so the CLI inside the
+    // container can reach the Companion server running on the host.
+    const sdkUrl = `ws://host.docker.internal:${this.port}/ws/cli/${sessionId}`;
+
+    const cliArgs: string[] = [
+      "claude",
+      "--sdk-url", sdkUrl,
+      "--print",
+      "--output-format", "stream-json",
+      "--input-format", "stream-json",
+      "--verbose",
+    ];
+
+    if (options.model) {
+      cliArgs.push("--model", options.model);
+    }
+    if (options.permissionMode) {
+      cliArgs.push("--permission-mode", options.permissionMode);
+    }
+    if (options.allowedTools) {
+      for (const tool of options.allowedTools) {
+        cliArgs.push("--allowedTools", tool);
+      }
+    }
+    if (options.resumeSessionId) {
+      cliArgs.push("--resume", options.resumeSessionId);
+    }
+    cliArgs.push("-p", "");
+
+    // Build env flags for docker exec
+    const envFlags: string[] = [];
+    envFlags.push("-e", "CLAUDECODE=1");
+    if (options.env) {
+      for (const [k, v] of Object.entries(options.env)) {
+        envFlags.push("-e", `${k}=${v}`);
+      }
+    }
+
+    const dockerArgs = [
+      "docker", "exec", "-i",
+      ...envFlags,
+      "-w", container.containerCwd,
+      container.containerId,
+      ...cliArgs,
+    ];
+
+    console.log(
+      `[cli-launcher] Spawning container session ${sessionId}: ${dockerArgs.join(" ")}`,
+    );
+
+    const proc = Bun.spawn(dockerArgs, {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    info.pid = proc.pid;
+    this.processes.set(sessionId, proc);
+
+    // Stream stdout/stderr for debugging
+    this.pipeOutput(sessionId, proc);
+
+    // Monitor process exit
+    proc.exited.then((exitCode) => {
+      console.log(`[cli-launcher] Container session ${sessionId} exited (code=${exitCode})`);
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.state = "exited";
+        session.exitCode = exitCode;
+      }
+      this.processes.delete(sessionId);
+      this.persistState();
+    });
+
+    this.persistState();
+  }
+
+  /**
+   * Inject a CLAUDE.md file into the workspace with container context.
+   * Writes to the host path (which is volume-mapped into the container).
+   */
+  private injectContainerGuardrails(hostCwd: string, container: ContainerInfo): void {
+    if (!existsSync(hostCwd)) {
+      console.warn(`[cli-launcher] Skipping container guardrails: path does not exist (${hostCwd})`);
+      return;
+    }
+
+    const portLines = container.portMappings
+      .map((p) => `- Container port ${p.containerPort} → accessible at \`localhost:${p.hostPort}\` on the host`)
+      .join("\n");
+
+    const MARKER_START = "<!-- CONTAINER_GUARDRAILS_START -->";
+    const MARKER_END = "<!-- CONTAINER_GUARDRAILS_END -->";
+    const guardrails = `${MARKER_START}
+# Container Session — Environment Info
+
+You are running inside a Docker container (\`${container.image}\`).
+The workspace is mounted at \`${container.containerCwd}\` from the host path \`${container.hostCwd}\`.
+
+${portLines ? `**Port Mappings:**\n${portLines}\n\nWhen starting a dev server or any service, use the container ports. The user will access them via the mapped host ports shown above.\n` : ""}**Rules:**
+1. Your working directory is \`${container.containerCwd}\`
+2. Do not modify files outside \`${container.containerCwd}\`
+3. The ~/.claude directory is read-only (authentication)
+${MARKER_END}`;
+
+    const claudeDir = join(hostCwd, ".claude");
+    const claudeMdPath = join(claudeDir, "CLAUDE.md");
+
+    try {
+      mkdirSync(claudeDir, { recursive: true });
+
+      if (existsSync(claudeMdPath)) {
+        const existing = readFileSync(claudeMdPath, "utf-8");
+        if (existing.includes(MARKER_START)) {
+          const before = existing.substring(0, existing.indexOf(MARKER_START));
+          const afterIdx = existing.indexOf(MARKER_END);
+          const after = afterIdx >= 0 ? existing.substring(afterIdx + MARKER_END.length) : "";
+          writeFileSync(claudeMdPath, before + guardrails + after, "utf-8");
+        } else {
+          writeFileSync(claudeMdPath, existing + "\n\n" + guardrails, "utf-8");
+        }
+      } else {
+        writeFileSync(claudeMdPath, guardrails, "utf-8");
+      }
+      console.log(`[cli-launcher] Injected container guardrails for ${container.name}`);
+    } catch (e) {
+      console.warn(`[cli-launcher] Failed to inject container guardrails:`, e);
+    }
   }
 
   /**
@@ -628,4 +815,26 @@ ${MARKER_END}`;
       this.pipeStream(sessionId, stderr, "stderr");
     }
   }
+}
+
+/**
+ * Convert persisted ContainerSessionInfo back to runtime ContainerInfo.
+ * Used when relaunching a container session (the persisted format lacks
+ * the `state` field that the runtime format carries).
+ */
+function sessionContainerToContainerInfo(
+  ci: ContainerSessionInfo,
+): ContainerInfo {
+  return {
+    containerId: ci.containerId,
+    name: ci.name,
+    image: ci.image,
+    portMappings: ci.portMappings.map((p) => ({
+      containerPort: p.containerPort,
+      hostPort: p.hostPort,
+    })),
+    hostCwd: ci.hostCwd,
+    containerCwd: ci.containerCwd,
+    state: "running",
+  };
 }

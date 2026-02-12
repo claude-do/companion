@@ -304,6 +304,8 @@ export const api = {
   // Containers
   getContainerStatus: () => get<ContainerStatus>("/containers/status"),
   getContainerImages: () => get<string[]>("/containers/images"),
+  buildContainerImage: (opts?: { tag?: string; dockerfilePath?: string }) =>
+    post<{ ok: boolean; tag: string; output: string }>("/containers/build", opts),
 
   // Editor
   startEditor: (sessionId: string) =>

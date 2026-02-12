@@ -18,6 +18,8 @@ export interface SessionItem {
   backendType: "claude" | "codex";
   repoRoot: string;
   permCount: number;
+  isContainer: boolean;
+  containerImage?: string;
 }
 
 export interface ProjectGroup {
