@@ -47,6 +47,7 @@ export async function generateSessionTitle(
 
   const model = settings.openrouterModel?.trim() || DEFAULT_OPENROUTER_MODEL;
   const truncated = firstUserMessage.slice(0, 500);
+  const userPrompt = `Generate a concise 3-5 word session title for this user request. Output only the title.\n\nRequest: ${truncated}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -62,13 +63,8 @@ export async function generateSessionTitle(
         model,
         messages: [
           {
-            role: "system",
-            content:
-              "Generate a concise 3-5 word session title for this user request. Output only the title.",
-          },
-          {
             role: "user",
-            content: truncated,
+            content: userPrompt,
           },
         ],
         temperature: 0.2,

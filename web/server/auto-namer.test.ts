@@ -58,7 +58,9 @@ describe("generateSessionTitle", () => {
     const [, req] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(req.body)) as { messages: Array<{ role: string; content: string }> };
     const user = body.messages.find((m) => m.role === "user");
-    expect(user?.content.length).toBe(500);
+    expect(user?.content).toContain("Request:");
+    expect(user?.content).toContain("X".repeat(500));
+    expect(user?.content).not.toContain("X".repeat(501));
   });
 
   it("uses configured OpenRouter model", async () => {
