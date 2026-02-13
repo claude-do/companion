@@ -147,7 +147,8 @@ export function resolveBinary(name: string): string | null {
 
   const enrichedPath = getEnrichedPath();
   try {
-    const resolved = execSync(`which ${name}`, {
+    const resolved = execSync(`which ${name.replace(/[^a-zA-Z0-9._@/-]/g, "")}`, {
+
       encoding: "utf-8",
       timeout: 5_000,
       env: { ...process.env, PATH: enrichedPath },
