@@ -20,6 +20,7 @@ import type {
   PermissionRequest,
   BackendType,
   McpServerDetail,
+  McpServerConfig,
 } from "./session-types.js";
 import type { SessionStore } from "./session-store.js";
 import type { CodexAdapter } from "./codex-adapter.js";
@@ -841,6 +842,10 @@ export class WsBridge {
       case "mcp_reconnect":
         this.handleMcpReconnect(session, msg.serverName);
         break;
+
+      case "mcp_set_servers":
+        this.handleMcpSetServers(session, msg.servers);
+        break;
     }
   }
 
@@ -1014,6 +1019,17 @@ export class WsBridge {
     this.sendToCLI(session, ndjson);
     // Refresh status after reconnect
     setTimeout(() => this.handleMcpGetStatus(session), 1000);
+  }
+
+  private handleMcpSetServers(session: Session, servers: Record<string, McpServerConfig>) {
+    const ndjson = JSON.stringify({
+      type: "control_request",
+      request_id: randomUUID(),
+      request: { subtype: "mcp_set_servers", servers },
+    });
+    this.sendToCLI(session, ndjson);
+    // Refresh status after servers are configured
+    setTimeout(() => this.handleMcpGetStatus(session), 2000);
   }
 
   // ── Transport helpers ───────────────────────────────────────────────────

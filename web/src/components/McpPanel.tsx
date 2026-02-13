@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.js";
-import { sendMcpGetStatus, sendMcpToggle, sendMcpReconnect } from "../ws.js";
+import { sendMcpGetStatus, sendMcpToggle, sendMcpReconnect, sendMcpSetServers } from "../ws.js";
 import type { McpServerDetail } from "../types.js";
 
 const EMPTY_SERVERS: McpServerDetail[] = [];
@@ -176,9 +176,160 @@ function McpServerRow({
   );
 }
 
+type ServerType = "stdio" | "sse" | "http";
+
+function AddServerForm({
+  sessionId,
+  onDone,
+}: {
+  sessionId: string;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [serverType, setServerType] = useState<ServerType>("stdio");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [url, setUrl] = useState("");
+
+  const canSubmit =
+    name.trim() &&
+    (serverType === "stdio" ? command.trim() : url.trim());
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+
+    const serverConfig: Record<string, any> = {
+      type: serverType,
+    };
+
+    if (serverType === "stdio") {
+      serverConfig.command = command.trim();
+      if (args.trim()) {
+        serverConfig.args = args.trim().split(/\s+/);
+      }
+    } else {
+      serverConfig.url = url.trim();
+    }
+
+    sendMcpSetServers(sessionId, { [name.trim()]: serverConfig as any });
+    onDone();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2 p-2.5 rounded-lg border border-cc-border bg-cc-bg">
+      {/* Server name */}
+      <div>
+        <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-0.5">
+          Server Name
+        </label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="my-mcp-server"
+          className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 focus:outline-none focus:border-cc-accent"
+        />
+      </div>
+
+      {/* Server type */}
+      <div>
+        <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-0.5">
+          Type
+        </label>
+        <div className="flex gap-1">
+          {(["stdio", "sse", "http"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setServerType(t)}
+              className={`text-[11px] px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                serverType === t
+                  ? "border-cc-accent text-cc-accent bg-cc-accent/10"
+                  : "border-cc-border text-cc-muted hover:text-cc-fg hover:border-cc-muted"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Stdio fields */}
+      {serverType === "stdio" && (
+        <>
+          <div>
+            <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-0.5">
+              Command
+            </label>
+            <input
+              type="text"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="npx -y @modelcontextprotocol/server-memory"
+              className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-0.5">
+              Args (space-separated, optional)
+            </label>
+            <input
+              type="text"
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              placeholder="--port 3000"
+              className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+            />
+          </div>
+        </>
+      )}
+
+      {/* URL field for sse/http */}
+      {(serverType === "sse" || serverType === "http") && (
+        <div>
+          <label className="text-[10px] text-cc-muted uppercase tracking-wider block mb-0.5">
+            URL
+          </label>
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://localhost:3000/mcp"
+            className="w-full text-[12px] bg-cc-bg-secondary border border-cc-border rounded px-2 py-1.5 text-cc-fg placeholder:text-cc-muted/40 font-mono focus:outline-none focus:border-cc-accent"
+          />
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-1.5 pt-1">
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className={`flex-1 text-[11px] font-medium py-1.5 rounded-md transition-colors ${
+            canSubmit
+              ? "bg-cc-accent text-white hover:bg-cc-accent/90 cursor-pointer"
+              : "bg-cc-hover text-cc-muted cursor-not-allowed"
+          }`}
+        >
+          Add Server
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="text-[11px] font-medium px-3 py-1.5 rounded-md text-cc-muted hover:text-cc-fg hover:bg-cc-hover transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function McpSection({ sessionId }: { sessionId: string }) {
   const servers = useStore((s) => s.mcpServers.get(sessionId) || EMPTY_SERVERS);
   const cliConnected = useStore((s) => s.cliConnected.get(sessionId) ?? false);
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // The session_init mcp_servers gives us basic info (name + status).
   // We can detect if MCP servers exist from session state to show the section.
@@ -194,8 +345,6 @@ export function McpSection({ sessionId }: { sessionId: string }) {
       sendMcpGetStatus(sessionId);
     }
   }, [sessionId, cliConnected, hasMcp]);
-
-  if (!hasMcp) return null;
 
   // If we have detailed servers, use those; otherwise fall back to basic info
   const displayServers: McpServerDetail[] =
@@ -218,33 +367,82 @@ export function McpSection({ sessionId }: { sessionId: string }) {
           </svg>
           MCP Servers
         </span>
-        <button
-          onClick={() => sendMcpGetStatus(sessionId)}
-          disabled={!cliConnected}
-          className={`text-[11px] font-medium transition-colors ${
-            cliConnected
-              ? "text-cc-muted hover:text-cc-fg cursor-pointer"
-              : "text-cc-muted/30 cursor-not-allowed"
-          }`}
-          title="Refresh MCP server status"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
-            <path d="M2.5 8a5.5 5.5 0 019.78-3.5M13.5 8a5.5 5.5 0 01-9.78 3.5" strokeLinecap="round" />
-            <path d="M12.5 2v3h-3M3.5 14v-3h3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Add server button */}
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            disabled={!cliConnected}
+            className={`text-[11px] font-medium transition-colors ${
+              cliConnected
+                ? "text-cc-muted hover:text-cc-fg cursor-pointer"
+                : "text-cc-muted/30 cursor-not-allowed"
+            }`}
+            title="Add MCP server"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+              <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+            </svg>
+          </button>
+          {/* Refresh button */}
+          {hasMcp && (
+            <button
+              onClick={() => sendMcpGetStatus(sessionId)}
+              disabled={!cliConnected}
+              className={`text-[11px] font-medium transition-colors ${
+                cliConnected
+                  ? "text-cc-muted hover:text-cc-fg cursor-pointer"
+                  : "text-cc-muted/30 cursor-not-allowed"
+              }`}
+              title="Refresh MCP server status"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5">
+                <path d="M2.5 8a5.5 5.5 0 019.78-3.5M13.5 8a5.5 5.5 0 01-9.78 3.5" strokeLinecap="round" />
+                <path d="M12.5 2v3h-3M3.5 14v-3h3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Server list */}
-      <div className="px-3 py-2 space-y-1.5 border-b border-cc-border">
-        {displayServers.map((server) => (
-          <McpServerRow
-            key={server.name}
-            server={server}
+      {/* Add server form */}
+      {showAddForm && (
+        <div className="px-3 py-2 border-b border-cc-border">
+          <AddServerForm
             sessionId={sessionId}
+            onDone={() => setShowAddForm(false)}
           />
-        ))}
-      </div>
+        </div>
+      )}
+
+      {/* Server list */}
+      {displayServers.length > 0 && (
+        <div className="px-3 py-2 space-y-1.5 border-b border-cc-border">
+          {displayServers.map((server) => (
+            <McpServerRow
+              key={server.name}
+              server={server}
+              sessionId={sessionId}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!showAddForm && displayServers.length === 0 && (
+        <div className="px-3 py-3 border-b border-cc-border">
+          <p className="text-[11px] text-cc-muted text-center">
+            No MCP servers configured.{" "}
+            {cliConnected && (
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="text-cc-accent hover:underline cursor-pointer"
+              >
+                Add one
+              </button>
+            )}
+          </p>
+        </div>
+      )}
     </>
   );
 }

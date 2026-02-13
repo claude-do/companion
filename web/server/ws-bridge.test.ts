@@ -2590,4 +2590,27 @@ describe("MCP control messages", () => {
     // Should not throw and not send anything
     expect(browser.send).not.toHaveBeenCalled();
   });
+
+  it("mcp_set_servers: sends mcp_set_servers control_request to CLI", () => {
+    vi.useFakeTimers();
+    const servers = {
+      "my-notes": {
+        type: "stdio" as const,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-memory"],
+      },
+    };
+    bridge.handleBrowserMessage(browser, JSON.stringify({
+      type: "mcp_set_servers",
+      servers,
+    }));
+
+    expect(cli.send).toHaveBeenCalledTimes(1);
+    const sentRaw = cli.send.mock.calls[0][0] as string;
+    const sent = JSON.parse(sentRaw.trim());
+    expect(sent.type).toBe("control_request");
+    expect(sent.request.subtype).toBe("mcp_set_servers");
+    expect(sent.request.servers).toEqual(servers);
+    vi.useRealTimers();
+  });
 });

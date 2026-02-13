@@ -178,7 +178,8 @@ export type BrowserOutgoingMessage =
   | { type: "set_permission_mode"; mode: string }
   | { type: "mcp_get_status" }
   | { type: "mcp_toggle"; serverName: string; enabled: boolean }
-  | { type: "mcp_reconnect"; serverName: string };
+  | { type: "mcp_reconnect"; serverName: string }
+  | { type: "mcp_set_servers"; servers: Record<string, McpServerConfig> };
 
 /** Messages the bridge sends to the browser */
 export type BrowserIncomingMessage =
@@ -232,6 +233,14 @@ export interface SessionState {
 }
 
 // ─── MCP Types ───────────────────────────────────────────────────────────────
+
+export interface McpServerConfig {
+  type: "stdio" | "sse" | "http" | "sdk";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
 
 export interface McpServerDetail {
   name: string;

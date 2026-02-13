@@ -1032,4 +1032,23 @@ describe("MCP status messages", () => {
     expect(sent.type).toBe("mcp_reconnect");
     expect(sent.serverName).toBe("failing-server");
   });
+
+  it("sendMcpSetServers: sends mcp_set_servers message", () => {
+    wsModule.connectSession("s1");
+    lastWs.send.mockClear();
+
+    const servers = {
+      "notes-server": {
+        type: "stdio" as const,
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-memory"],
+      },
+    };
+    wsModule.sendMcpSetServers("s1", servers);
+
+    expect(lastWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(lastWs.send.mock.calls[0][0]);
+    expect(sent.type).toBe("mcp_set_servers");
+    expect(sent.servers).toEqual(servers);
+  });
 });
