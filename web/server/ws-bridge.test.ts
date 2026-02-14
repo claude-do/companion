@@ -1202,6 +1202,36 @@ describe("Browser message routing", () => {
     expect(sent.response.response.behavior).toBe("deny");
   });
 
+  it("permission request: plugin emit failure falls back to user permission flow", async () => {
+    bridge.setPluginManager({
+      emit: vi.fn(async (event: any) => {
+        if (event.name === "permission.requested") {
+          throw new Error("plugin manager failed");
+        }
+        return { insights: [], aborted: false };
+      }),
+    } as any);
+    cli.send.mockClear();
+    browser.send.mockClear();
+
+    bridge.handleCLIMessage(cli, JSON.stringify({
+      type: "control_request",
+      request_id: "req-emit-fail-1",
+      request: {
+        subtype: "can_use_tool",
+        tool_name: "Bash",
+        input: { command: "echo test" },
+        tool_use_id: "tu-emit-fail-1",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(cli.send).not.toHaveBeenCalled();
+    expect(browser.send).toHaveBeenCalledWith(expect.stringContaining("\"type\":\"permission_request\""));
+    const session = bridge.getSession("s1");
+    expect(session?.pendingPermissions.has("req-emit-fail-1")).toBe(true);
+  });
+
   it("permission_response deny: sends deny response to CLI", () => {
     // Create a pending permission
     bridge.handleCLIMessage(cli, JSON.stringify({
@@ -1432,6 +1462,47 @@ describe("Codex permission handling", () => {
       request_id: "codex-req-1",
       behavior: "deny",
     }));
+  });
+
+  it("plugin emit failure falls back to pending permission for Codex", async () => {
+    let onBrowserMessageHandler: ((msg: any) => void) | null = null;
+    const adapter = {
+      onBrowserMessage: (handler: (msg: any) => void) => {
+        onBrowserMessageHandler = handler;
+      },
+      onSessionMeta: (_handler: (meta: any) => void) => {},
+      onDisconnect: (_handler: () => void) => {},
+      onInitError: (_handler: (error: Error) => void) => {},
+      sendBrowserMessage: vi.fn(),
+      isConnected: () => true,
+    };
+
+    bridge.setPluginManager({
+      emit: vi.fn(async (event: any) => {
+        if (event.name === "permission.requested") {
+          throw new Error("plugin manager failed");
+        }
+        return { insights: [], aborted: false };
+      }),
+    } as any);
+    bridge.attachCodexAdapter("s-codex-emit-fail", adapter as any);
+    expect(onBrowserMessageHandler).toBeTruthy();
+
+    onBrowserMessageHandler!({
+      type: "permission_request",
+      request: {
+        request_id: "codex-req-emit-fail",
+        tool_name: "Bash",
+        input: { command: "echo test" },
+        tool_use_id: "codex-tu-emit-fail",
+        timestamp: Date.now(),
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    const session = bridge.getSession("s-codex-emit-fail");
+    expect(session?.pendingPermissions.has("codex-req-emit-fail")).toBe(true);
+    expect(adapter.sendBrowserMessage).not.toHaveBeenCalled();
   });
 });
 

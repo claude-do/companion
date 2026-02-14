@@ -328,19 +328,38 @@ export class WsBridge {
     if (!this.pluginManager) return { insights: [], aborted: false };
     const sessionId = event.meta.sessionId;
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
-    const result = await this.pluginManager.emit(event, {
-      onInsight: (insight) => {
-        if (session) {
-          this.broadcastPluginInsights(session, [insight as PluginInsight]);
-        }
-      },
-    });
-    return {
-      insights: result.insights as PluginInsight[],
-      permissionDecision: result.permissionDecision,
-      userMessageMutation: result.userMessageMutation,
-      aborted: result.aborted,
-    };
+    try {
+      const result = await this.pluginManager.emit(event, {
+        onInsight: (insight) => {
+          if (session) {
+            this.broadcastPluginInsights(session, [insight as PluginInsight]);
+          }
+        },
+      });
+      return {
+        insights: result.insights as PluginInsight[],
+        permissionDecision: result.permissionDecision,
+        userMessageMutation: result.userMessageMutation,
+        aborted: result.aborted,
+      };
+    } catch (err) {
+      console.error(`[ws-bridge] Plugin event emit failed (${event.name}):`, err);
+      if (session) {
+        this.broadcastPluginInsights(session, [{
+          id: `plugin-manager-${Date.now()}-emit-error`,
+          plugin_id: "plugin-manager",
+          title: "Plugin system error",
+          message: `Failed to process plugin event "${event.name}".`,
+          level: "error",
+          timestamp: Date.now(),
+          session_id: session.id,
+          event_name: event.name,
+        }]);
+      }
+      // Never propagate plugin runtime errors to event callers.
+      // This avoids dropping permission requests if plugin processing fails.
+      return { insights: [], aborted: false };
+    }
   }
 
   private broadcastPluginInsights(session: Session, insights: PluginInsight[]): void {
