@@ -62,6 +62,7 @@ export function HomePage() {
   const [showEnvManager, setShowEnvManager] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const createAbortRef = useRef<AbortController | null>(null);
 
   // Dropdown states
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -90,6 +91,17 @@ export function HomePage() {
 
   const setCurrentSession = useStore((s) => s.setCurrentSession);
   const currentSessionId = useStore((s) => s.currentSessionId);
+  const sessionCreating = useStore((s) => s.sessionCreating);
+
+  // When overlay is dismissed (sessionCreating → false), reset local sending state
+  // and abort any in-flight creation request
+  useEffect(() => {
+    if (!sessionCreating && sending) {
+      createAbortRef.current?.abort();
+      createAbortRef.current = null;
+      setSending(false);
+    }
+  }, [sessionCreating, sending]);
 
   // Auto-focus textarea (desktop only — on mobile it triggers the keyboard immediately)
   useEffect(() => {
@@ -279,6 +291,10 @@ export function HomePage() {
     store.clearCreation();
     store.setSessionCreating(true, backend as "claude" | "codex");
 
+    // Abort controller so the overlay cancel button can stop the in-flight request
+    const abort = new AbortController();
+    createAbortRef.current = abort;
+
     try {
       // Disconnect current session if any
       if (currentSessionId) {
@@ -302,6 +318,7 @@ export function HomePage() {
         (progress) => {
           useStore.getState().addCreationProgress(progress);
         },
+        abort.signal,
       );
       const sessionId = result.sessionId;
 
@@ -341,8 +358,11 @@ export function HomePage() {
       });
 
       // Clear progress on success
+      createAbortRef.current = null;
       useStore.getState().clearCreation();
     } catch (e: unknown) {
+      // Ignore abort errors — the user intentionally cancelled
+      if (e instanceof DOMException && e.name === "AbortError") return;
       const errMsg = e instanceof Error ? e.message : String(e);
       setError(errMsg);
       // Set error in store so the overlay can display it; keep sessionCreating

@@ -691,5 +691,9 @@ export const useStore = create<AppState>((set) => ({
       terminalOpen: false,
       terminalCwd: null,
       terminalId: null,
+      creationProgress: null,
+      creationError: null,
+      sessionCreating: false,
+      sessionCreatingBackend: null,
     }),
 }));
