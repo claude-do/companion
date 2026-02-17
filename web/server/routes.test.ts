@@ -484,6 +484,7 @@ describe("POST /api/sessions/create", () => {
     vi.mocked(envManager.getEffectiveImage).mockReturnValue("the-companion:latest");
     vi.mocked(existsSync).mockReturnValueOnce(true);
     vi.spyOn(containerManager, "imageExists").mockReturnValueOnce(false);
+    vi.spyOn(containerManager, "pullImage").mockResolvedValueOnce(false);
     const buildSpy = vi.spyOn(containerManager, "buildImage").mockReturnValue("ok");
     vi.spyOn(containerManager, "createContainer").mockReturnValueOnce({
       containerId: "cid-1",
