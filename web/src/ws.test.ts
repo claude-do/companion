@@ -493,6 +493,29 @@ describe("handleMessage: stream_event content_block_delta", () => {
 
     expect(useStore.getState().streaming.get("s1")).toBe("Thinking:\nPlan");
   });
+
+  it("resets to a new thinking section if thinking resumes after response text", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "A" } },
+      parent_tool_use_id: null,
+    });
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "text_delta", text: "B" } },
+      parent_tool_use_id: null,
+    });
+    fireMessage({
+      type: "stream_event",
+      event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "C" } },
+      parent_tool_use_id: null,
+    });
+
+    expect(useStore.getState().streaming.get("s1")).toBe("Thinking:\nC");
+  });
 });
 
 // ===========================================================================

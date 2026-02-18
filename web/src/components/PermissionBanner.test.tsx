@@ -454,6 +454,25 @@ describe("AskUserQuestionDisplay", () => {
     const payload = mockSendToSession.mock.calls[0][1];
     expect(payload.updated_input.answers).toEqual({ "1": "Custom response" });
   });
+
+  it("shows Enter hint for single-question custom Other input", () => {
+    const perm = makePermission({
+      tool_name: "AskUserQuestion",
+      input: {
+        questions: [
+          {
+            header: "Q",
+            question: "Choose",
+            options: [{ label: "X", description: "Option X" }],
+          },
+        ],
+      },
+    });
+    render(<PermissionBanner permission={perm} sessionId="s1" />);
+
+    fireEvent.click(screen.getByText("Other..."));
+    expect(screen.getByText("Press Enter to submit")).toBeTruthy();
+  });
 });
 
 // ─── ExitPlanModeDisplay ─────────────────────────────────────────────────────

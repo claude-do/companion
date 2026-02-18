@@ -350,6 +350,9 @@ function AskUserQuestionDisplay({
                       className="w-full px-2.5 py-1.5 text-xs bg-cc-input-bg border border-cc-border rounded-lg text-cc-fg placeholder:text-cc-muted focus:outline-none focus:border-cc-primary/50"
                       autoFocus
                     />
+                    {questions.length <= 1 && (
+                      <p className="mt-1 text-[10px] text-cc-muted">Press Enter to submit</p>
+                    )}
                   </div>
                 )}
               </div>
