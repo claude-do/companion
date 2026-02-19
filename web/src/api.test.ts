@@ -309,22 +309,32 @@ describe("settings", () => {
     expect(result).toEqual(data);
   });
 
-  it("transitions a Linear issue to In Progress", async () => {
-    const data = { ok: true, skipped: false, issue: { id: "i1", identifier: "ENG-1", stateName: "In Progress", stateType: "started" } };
+  it("transitions a Linear issue", async () => {
+    const data = { ok: true, skipped: false };
     mockFetch.mockResolvedValueOnce(mockResponse(data));
 
-    const result = await api.transitionLinearIssue("issue-123", "team-1", "unstarted");
+    const result = await api.transitionLinearIssue("issue-123");
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/linear/issues/issue-123/transition");
     expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body)).toEqual({ teamId: "team-1", currentStateType: "unstarted" });
+    expect(JSON.parse(opts.body)).toEqual({});
     expect(result).toEqual(data);
   });
 
   it("surfaces backend error for Linear issue transition", async () => {
     mockFetch.mockResolvedValueOnce(mockResponse({ error: "Linear transition failed" }, 502));
 
-    await expect(api.transitionLinearIssue("issue-123", "team-1", "unstarted")).rejects.toThrow("Linear transition failed");
+    await expect(api.transitionLinearIssue("issue-123")).rejects.toThrow("Linear transition failed");
+  });
+
+  it("fetches Linear workflow states", async () => {
+    const data = { teams: [{ id: "t1", key: "ENG", name: "Engineering", states: [{ id: "s1", name: "In Progress", type: "started" }] }] };
+    mockFetch.mockResolvedValueOnce(mockResponse(data));
+
+    const result = await api.getLinearStates();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/linear/states");
+    expect(result).toEqual(data);
   });
 });
 

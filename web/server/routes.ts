@@ -1310,6 +1310,8 @@ export function createRoutes(
       openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
       openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
+      linearAutoTransition: settings.linearAutoTransition,
+      linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
     });
   });
 
@@ -1324,7 +1326,19 @@ export function createRoutes(
     if (body.linearApiKey !== undefined && typeof body.linearApiKey !== "string") {
       return c.json({ error: "linearApiKey must be a string" }, 400);
     }
-    if (body.openrouterApiKey === undefined && body.openrouterModel === undefined && body.linearApiKey === undefined) {
+    if (body.linearAutoTransition !== undefined && typeof body.linearAutoTransition !== "boolean") {
+      return c.json({ error: "linearAutoTransition must be a boolean" }, 400);
+    }
+    if (body.linearAutoTransitionStateId !== undefined && typeof body.linearAutoTransitionStateId !== "string") {
+      return c.json({ error: "linearAutoTransitionStateId must be a string" }, 400);
+    }
+    if (body.linearAutoTransitionStateName !== undefined && typeof body.linearAutoTransitionStateName !== "string") {
+      return c.json({ error: "linearAutoTransitionStateName must be a string" }, 400);
+    }
+    const hasAnyField = body.openrouterApiKey !== undefined || body.openrouterModel !== undefined
+      || body.linearApiKey !== undefined || body.linearAutoTransition !== undefined
+      || body.linearAutoTransitionStateId !== undefined || body.linearAutoTransitionStateName !== undefined;
+    if (!hasAnyField) {
       return c.json({ error: "At least one settings field is required" }, 400);
     }
 
@@ -1341,12 +1355,26 @@ export function createRoutes(
         typeof body.linearApiKey === "string"
           ? body.linearApiKey.trim()
           : undefined,
+      linearAutoTransition:
+        typeof body.linearAutoTransition === "boolean"
+          ? body.linearAutoTransition
+          : undefined,
+      linearAutoTransitionStateId:
+        typeof body.linearAutoTransitionStateId === "string"
+          ? body.linearAutoTransitionStateId.trim()
+          : undefined,
+      linearAutoTransitionStateName:
+        typeof body.linearAutoTransitionStateName === "string"
+          ? body.linearAutoTransitionStateName.trim()
+          : undefined,
     });
 
     return c.json({
       openrouterApiKeyConfigured: !!settings.openrouterApiKey.trim(),
       openrouterModel: settings.openrouterModel || DEFAULT_OPENROUTER_MODEL,
       linearApiKeyConfigured: !!settings.linearApiKey.trim(),
+      linearAutoTransition: settings.linearAutoTransition,
+      linearAutoTransitionStateName: settings.linearAutoTransitionStateName,
     });
   });
 
@@ -1484,44 +1512,27 @@ export function createRoutes(
     });
   });
 
-  api.post("/linear/issues/:id/transition", async (c) => {
-    const issueId = c.req.param("id");
-    if (!issueId) {
-      return c.json({ error: "Issue ID is required" }, 400);
-    }
-
-    const body = await c.req.json().catch(() => ({})) as {
-      teamId?: string;
-      currentStateType?: string;
-    };
-
-    // Skip if issue is already in "started" or "completed" state
-    if (body.currentStateType === "started" || body.currentStateType === "completed") {
-      return c.json({ ok: true, skipped: true, reason: "already_in_progress_or_completed" });
-    }
-
+  api.get("/linear/states", async (c) => {
     const settings = getSettings();
     const linearApiKey = settings.linearApiKey.trim();
     if (!linearApiKey) {
       return c.json({ error: "Linear API key is not configured" }, 400);
     }
 
-    if (!body.teamId) {
-      return c.json({ error: "teamId is required" }, 400);
-    }
-
-    try {
-      // Query workflow states for this team to find the "started" type state
-      const statesResponse = await fetch("https://api.linear.app/graphql", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: linearApiKey,
-        },
-        body: JSON.stringify({
-          query: `
-            query CompanionTeamStates($teamId: String!) {
-              team(id: $teamId) {
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: linearApiKey,
+      },
+      body: JSON.stringify({
+        query: `
+          query CompanionWorkflowStates {
+            teams {
+              nodes {
+                id
+                key
+                name
                 states {
                   nodes {
                     id
@@ -1531,35 +1542,74 @@ export function createRoutes(
                 }
               }
             }
-          `,
-          variables: { teamId: body.teamId },
-        }),
-      });
+          }
+        `,
+      }),
+    }).catch((e: unknown) => {
+      throw new Error(`Failed to connect to Linear: ${e instanceof Error ? e.message : String(e)}`);
+    });
 
-      const statesJson = await statesResponse.json().catch(() => ({})) as {
-        data?: {
-          team?: {
+    const json = await response.json().catch(() => ({})) as {
+      data?: {
+        teams?: {
+          nodes?: Array<{
+            id?: string;
+            key?: string | null;
+            name?: string | null;
             states?: {
-              nodes?: Array<{ id: string; name: string; type: string }>;
+              nodes?: Array<{
+                id?: string;
+                name?: string | null;
+                type?: string | null;
+              }>;
             };
-          };
+          }>;
         };
-        errors?: Array<{ message?: string }>;
       };
+      errors?: Array<{ message?: string }>;
+    };
 
-      if (!statesResponse.ok || (statesJson.errors && statesJson.errors.length > 0)) {
-        const errMsg = statesJson.errors?.[0]?.message || statesResponse.statusText || "Failed to fetch team states";
-        return c.json({ error: errMsg }, 502);
-      }
+    if (!response.ok || (json.errors && json.errors.length > 0)) {
+      const firstError = json.errors?.[0]?.message || response.statusText || "Linear request failed";
+      return c.json({ error: firstError }, 502);
+    }
 
-      const states = statesJson.data?.team?.states?.nodes || [];
-      const startedState = states.find((s) => s.type === "started");
+    const teams = (json.data?.teams?.nodes || []).map((team) => ({
+      id: team.id || "",
+      key: team.key || "",
+      name: team.name || "",
+      states: (team.states?.nodes || []).map((state) => ({
+        id: state.id || "",
+        name: state.name || "",
+        type: state.type || "",
+      })),
+    }));
 
-      if (!startedState) {
-        return c.json({ ok: true, skipped: true, reason: "no_started_state_found" });
-      }
+    return c.json({ teams });
+  });
 
-      // Update the issue state
+  api.post("/linear/issues/:id/transition", async (c) => {
+    const issueId = c.req.param("id");
+    if (!issueId) {
+      return c.json({ error: "Issue ID is required" }, 400);
+    }
+
+    const settings = getSettings();
+    const linearApiKey = settings.linearApiKey.trim();
+    if (!linearApiKey) {
+      return c.json({ error: "Linear API key is not configured" }, 400);
+    }
+
+    if (!settings.linearAutoTransition) {
+      return c.json({ ok: true, skipped: true, reason: "auto_transition_disabled" });
+    }
+
+    const stateId = settings.linearAutoTransitionStateId.trim();
+    if (!stateId) {
+      return c.json({ ok: true, skipped: true, reason: "no_target_state_configured" });
+    }
+
+    try {
       const updateResponse = await fetch("https://api.linear.app/graphql", {
         method: "POST",
         headers: {
@@ -1579,7 +1629,7 @@ export function createRoutes(
               }
             }
           `,
-          variables: { issueId, stateId: startedState.id },
+          variables: { issueId, stateId },
         }),
       });
 
