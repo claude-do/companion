@@ -368,7 +368,6 @@ export function HomePage() {
 
     if (!linearConfigured) {
       setShowLinearStartWarning(true);
-      return;
     }
 
     setSending(true);
@@ -1018,14 +1017,14 @@ export function HomePage() {
 
         {!linearConfigured && (
           <div className="mt-3 p-3 rounded-[10px] bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300">
-            Attention: vous n&apos;avez pas configuré Linear. Vous êtes sûr ? En général, il y a pas mal de drift quand le problème n&apos;est pas clarifié.
+            Warning: Linear is not configured. Are you sure you want to continue? Problem drift is common without clear issue context.
           </div>
         )}
 
         {showLinearStartWarning && (
           <div className="mt-3 p-3 rounded-[10px] bg-amber-500/10 border border-amber-500/20">
             <p className="text-xs text-amber-700 dark:text-amber-300 leading-snug">
-              Attention: vous n&apos;avez pas configuré Linear. Vous êtes sûr ? En général, il y a pas mal de drift quand le problème n&apos;est pas clarifié.
+              Warning: Linear is not configured. Are you sure you want to continue? Problem drift is common without clear issue context.
             </p>
             <div className="flex gap-2 mt-2.5">
               <button
