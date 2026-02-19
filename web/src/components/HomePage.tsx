@@ -264,30 +264,28 @@ export function HomePage() {
     }
 
     let active = true;
+    setRecentIssuesLoading(true);
+    setRecentIssuesError("");
 
-    api.getLinearProjectMapping(gitRepoInfo.repoRoot)
-      .then(({ mapping }) => {
+    (async () => {
+      try {
+        const { mapping } = await api.getLinearProjectMapping(gitRepoInfo.repoRoot);
         if (!active) return;
         setLinearMapping(mapping);
         if (mapping) {
-          setRecentIssuesLoading(true);
-          setRecentIssuesError("");
-          return api.getLinearTeamIssues(mapping.teamId, 10).then(({ issues }) => {
-            if (!active) return;
-            setRecentIssues(issues);
-          });
+          const { issues } = await api.getLinearTeamIssues(mapping.teamId, 10);
+          if (!active) return;
+          setRecentIssues(issues);
         } else {
           setRecentIssues([]);
         }
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         if (!active) return;
         setRecentIssuesError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!active) return;
-        setRecentIssuesLoading(false);
-      });
+      } finally {
+        if (active) setRecentIssuesLoading(false);
+      }
+    })();
 
     return () => { active = false; };
   }, [gitRepoInfo, linearConfigured]);
