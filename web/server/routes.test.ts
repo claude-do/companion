@@ -44,6 +44,7 @@ vi.mock("./git-utils.js", () => ({
   gitFetch: vi.fn(() => ({ success: true, output: "" })),
   gitPull: vi.fn(() => ({ success: true, output: "" })),
   checkoutBranch: vi.fn(),
+  checkoutOrCreateBranch: vi.fn(() => ({ created: false })),
   removeWorktree: vi.fn(),
   isWorktreeDirty: vi.fn(() => false),
 }));
@@ -306,7 +307,7 @@ describe("POST /api/sessions/create", () => {
 
     expect(res.status).toBe(200);
     expect(gitUtils.gitFetch).toHaveBeenCalledWith("/repo");
-    expect(gitUtils.checkoutBranch).not.toHaveBeenCalled();
+    expect(gitUtils.checkoutOrCreateBranch).not.toHaveBeenCalled();
     expect(gitUtils.gitPull).toHaveBeenCalledWith("/repo");
   });
 
@@ -327,12 +328,15 @@ describe("POST /api/sessions/create", () => {
 
     expect(res.status).toBe(200);
     expect(gitUtils.gitFetch).toHaveBeenCalledWith("/repo");
-    expect(gitUtils.checkoutBranch).toHaveBeenCalledWith("/repo", "main");
+    expect(gitUtils.checkoutOrCreateBranch).toHaveBeenCalledWith("/repo", "main", {
+      createBranch: undefined,
+      defaultBranch: "main",
+    });
     expect(gitUtils.gitPull).toHaveBeenCalledWith("/repo");
     expect(vi.mocked(gitUtils.gitFetch).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(gitUtils.checkoutBranch).mock.invocationCallOrder[0],
+      vi.mocked(gitUtils.checkoutOrCreateBranch).mock.invocationCallOrder[0],
     );
-    expect(vi.mocked(gitUtils.checkoutBranch).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(vi.mocked(gitUtils.checkoutOrCreateBranch).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(gitUtils.gitPull).mock.invocationCallOrder[0],
     );
   });

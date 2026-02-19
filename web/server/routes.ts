@@ -153,7 +153,10 @@ export function createRoutes(
           }
 
           if (repoInfo.currentBranch !== body.branch) {
-            gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+            gitUtils.checkoutOrCreateBranch(repoInfo.repoRoot, body.branch, {
+              createBranch: body.createBranch,
+              defaultBranch: repoInfo.defaultBranch,
+            });
           }
 
           const pullResult = gitUtils.gitPull(repoInfo.repoRoot);
@@ -411,7 +414,10 @@ export function createRoutes(
 
             if (repoInfo.currentBranch !== body.branch) {
               await emitProgress(stream, "checkout_branch", `Checking out ${body.branch}...`, "in_progress");
-              gitUtils.checkoutBranch(repoInfo.repoRoot, body.branch);
+              gitUtils.checkoutOrCreateBranch(repoInfo.repoRoot, body.branch, {
+                createBranch: body.createBranch,
+                defaultBranch: repoInfo.defaultBranch,
+              });
               await emitProgress(stream, "checkout_branch", `On branch ${body.branch}`, "done");
             }
 
