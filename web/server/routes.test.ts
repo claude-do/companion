@@ -1363,7 +1363,7 @@ describe("GET /api/linear/issues", () => {
     expect(json).toEqual({ error: "Linear API key is not configured" });
   });
 
-  it("proxies Linear issue search results", async () => {
+  it("proxies Linear issue search results with branchName", async () => {
     vi.mocked(settingsManager.getSettings).mockReturnValue({
       openrouterApiKey: "",
       openrouterModel: "openrouter/free",
@@ -1383,6 +1383,7 @@ describe("GET /api/linear/issues", () => {
               title: "Fix auth flow",
               description: "401 on refresh token",
               url: "https://linear.app/acme/issue/ENG-123/fix-auth-flow",
+              branchName: "eng-123-fix-auth-flow",
               priorityLabel: "High",
               state: { name: "In Progress", type: "started" },
               team: { key: "ENG", name: "Engineering" },
@@ -1403,6 +1404,7 @@ describe("GET /api/linear/issues", () => {
         title: "Fix auth flow",
         description: "401 on refresh token",
         url: "https://linear.app/acme/issue/ENG-123/fix-auth-flow",
+        branchName: "eng-123-fix-auth-flow",
         priorityLabel: "High",
         stateName: "In Progress",
         stateType: "started",
@@ -1419,8 +1421,50 @@ describe("GET /api/linear/issues", () => {
     );
     const [, requestInit] = vi.mocked(fetchMock).mock.calls[0];
     const requestBody = JSON.parse(String(requestInit?.body ?? "{}"));
+    // Verify branchName is requested in the GraphQL query
+    expect(requestBody.query).toContain("branchName");
     expect(requestBody.query).toContain("searchIssues(term: $term, first: $first)");
     expect(requestBody.variables).toEqual({ term: "auth", first: 5 });
+    vi.unstubAllGlobals();
+  });
+
+  it("returns empty branchName when Linear does not provide one", async () => {
+    // Verifies fallback: when branchName is null/missing from Linear API,
+    // the response maps it to an empty string so the frontend can generate a slug
+    vi.mocked(settingsManager.getSettings).mockReturnValue({
+      openrouterApiKey: "",
+      openrouterModel: "openrouter/free",
+      linearApiKey: "lin_api_123",
+      updatedAt: 0,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      statusText: "OK",
+      json: async () => ({
+        data: {
+          searchIssues: {
+            nodes: [{
+              id: "issue-id-2",
+              identifier: "ENG-456",
+              title: "Add dark mode",
+              description: null,
+              url: "https://linear.app/acme/issue/ENG-456/add-dark-mode",
+              branchName: null,
+              priorityLabel: null,
+              state: null,
+              team: null,
+            }],
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/api/linear/issues?query=dark", { method: "GET" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.issues[0].branchName).toBe("");
     vi.unstubAllGlobals();
   });
 });
