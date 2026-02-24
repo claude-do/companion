@@ -165,6 +165,7 @@ describe("Session management", () => {
     useStore.getState().setCliConnected("s1", true);
     useStore.getState().setSessionStatus("s1", "running");
     useStore.getState().setPreviousPermissionMode("s1", "default");
+    useStore.getState().setSessionDraft("s1", "draft message");
 
     useStore.getState().removeSession("s1");
     const state = useStore.getState();
@@ -181,6 +182,7 @@ describe("Session management", () => {
     expect(state.cliConnected.has("s1")).toBe(false);
     expect(state.sessionStatus.has("s1")).toBe(false);
     expect(state.previousPermissionMode.has("s1")).toBe(false);
+    expect(state.sessionDrafts.has("s1")).toBe(false);
     expect(state.currentSessionId).toBeNull();
   });
 
@@ -499,6 +501,34 @@ describe("UI state", () => {
     expect(localStorage.getItem("cc-current-session")).toBeNull();
   });
 
+  it("setHomeDraft: stores draft text and persists to localStorage", () => {
+    useStore.getState().setHomeDraft("draft for home");
+    const state = useStore.getState();
+    expect(state.homeDraft?.text).toBe("draft for home");
+
+    const stored = JSON.parse(localStorage.getItem("cc-drafts-v1") || "{}") as {
+      homeDraft?: { text?: string };
+    };
+    expect(stored.homeDraft?.text).toBe("draft for home");
+  });
+
+  it("setSessionDraft + clearSessionDraft: persists and clears per-session drafts", () => {
+    useStore.getState().setSessionDraft("s1", "hello draft");
+    expect(useStore.getState().sessionDrafts.get("s1")?.text).toBe("hello draft");
+
+    let stored = JSON.parse(localStorage.getItem("cc-drafts-v1") || "{}") as {
+      sessionDrafts?: Array<[string, { text: string; updatedAt: number }]>;
+    };
+    const storedMap = new Map<string, { text: string; updatedAt: number }>(stored.sessionDrafts || []);
+    expect(storedMap.get("s1")?.text).toBe("hello draft");
+
+    useStore.getState().clearSessionDraft("s1");
+    expect(useStore.getState().sessionDrafts.has("s1")).toBe(false);
+
+    stored = JSON.parse(localStorage.getItem("cc-drafts-v1") || "{}");
+    expect(new Map(stored.sessionDrafts || []).has("s1")).toBe(false);
+  });
+
   it("openQuickTerminal with reuseIfExists focuses existing tab instead of creating a new one", () => {
     useStore.getState().openQuickTerminal({ target: "host", cwd: "/repo" });
     const firstTabId = useStore.getState().activeQuickTerminalTabId;
@@ -566,6 +596,8 @@ describe("reset", () => {
     expect(state.sessionNames.size).toBe(0);
     expect(state.recentlyRenamed.size).toBe(0);
     expect(state.mcpServers.size).toBe(0);
+    expect(state.homeDraft).toBeNull();
+    expect(state.sessionDrafts.size).toBe(0);
   });
 });
 

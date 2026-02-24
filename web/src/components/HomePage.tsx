@@ -89,7 +89,6 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 export function HomePage() {
-  const [text, setText] = useState("");
   const [backend, setBackend] = useState<BackendType>(() =>
     (localStorage.getItem("cc-backend") as BackendType) || "claude",
   );
@@ -155,6 +154,10 @@ export function HomePage() {
   const envDropdownRef = useRef<HTMLDivElement>(null);
 
   const currentSessionId = useStore((s) => s.currentSessionId);
+  const homeDraft = useStore((s) => s.homeDraft);
+  const setHomeDraft = useStore((s) => s.setHomeDraft);
+  const clearHomeDraft = useStore((s) => s.clearHomeDraft);
+  const text = homeDraft?.text ?? "";
 
   // Auto-focus textarea (desktop only — on mobile it triggers the keyboard immediately)
   useEffect(() => {
@@ -446,7 +449,7 @@ export function HomePage() {
   }
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value);
+    setHomeDraft(e.target.value);
     const ta = e.target;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
@@ -622,6 +625,8 @@ export function HomePage() {
           timestamp: Date.now(),
         });
       }
+
+      clearHomeDraft();
 
       // Auto-link Linear issue if one was selected
       if (selectedLinearIssue) {

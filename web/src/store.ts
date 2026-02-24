@@ -30,6 +30,64 @@ export type QuickTerminalPlacement = "top" | "right" | "bottom" | "left";
 
 export type DiffBase = "last-commit" | "default-branch";
 
+interface DraftEntry {
+  text: string;
+  updatedAt: number;
+}
+
+interface StoredDrafts {
+  homeDraft: DraftEntry | null;
+  sessionDrafts: Array<[string, DraftEntry]>;
+}
+
+const DRAFTS_STORAGE_KEY = "cc-drafts-v1";
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isValidDraftEntry(value: unknown): value is DraftEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as { text?: unknown; updatedAt?: unknown };
+  return typeof entry.text === "string" && typeof entry.updatedAt === "number" && Number.isFinite(entry.updatedAt);
+}
+
+function pruneDraftEntry(entry: DraftEntry | null): DraftEntry | null {
+  if (!entry) return null;
+  if (Date.now() - entry.updatedAt > DRAFT_TTL_MS) return null;
+  if (!entry.text) return null;
+  return entry;
+}
+
+function persistDrafts(homeDraft: DraftEntry | null, sessionDrafts: Map<string, DraftEntry>): void {
+  if (typeof window === "undefined") return;
+  const payload: StoredDrafts = {
+    homeDraft,
+    sessionDrafts: Array.from(sessionDrafts.entries()),
+  };
+  localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function getInitialDrafts(): { homeDraft: DraftEntry | null; sessionDrafts: Map<string, DraftEntry> } {
+  if (typeof window === "undefined") {
+    return { homeDraft: null, sessionDrafts: new Map() };
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DRAFTS_STORAGE_KEY) || "{}") as Partial<StoredDrafts>;
+    const homeDraft = isValidDraftEntry(parsed.homeDraft) ? pruneDraftEntry(parsed.homeDraft) : null;
+    const sessionDrafts = new Map<string, DraftEntry>();
+    if (Array.isArray(parsed.sessionDrafts)) {
+      for (const item of parsed.sessionDrafts) {
+        if (!Array.isArray(item) || item.length !== 2) continue;
+        const [sessionId, entry] = item;
+        if (typeof sessionId !== "string" || !isValidDraftEntry(entry)) continue;
+        const pruned = pruneDraftEntry(entry);
+        if (pruned) sessionDrafts.set(sessionId, pruned);
+      }
+    }
+    return { homeDraft, sessionDrafts };
+  } catch {
+    return { homeDraft: null, sessionDrafts: new Map() };
+  }
+}
+
 interface AppState {
   // Sessions
   sessions: Map<string, SessionState>;
@@ -200,6 +258,14 @@ interface AppState {
   markChatTabReentry: (sessionId: string) => void;
   setDiffPanelSelectedFile: (sessionId: string, filePath: string | null) => void;
 
+  // Drafts
+  homeDraft: DraftEntry | null;
+  sessionDrafts: Map<string, DraftEntry>;
+  setHomeDraft: (text: string) => void;
+  clearHomeDraft: () => void;
+  setSessionDraft: (sessionId: string, text: string) => void;
+  clearSessionDraft: (sessionId: string) => void;
+
   // Session quick terminal (docked in session workspace)
   quickTerminalOpen: boolean;
   quickTerminalTabs: QuickTerminalTab[];
@@ -300,6 +366,7 @@ function getInitialDiffBase(): DiffBase {
 }
 
 export const useStore = create<AppState>((set) => ({
+  ...getInitialDrafts(),
   sessions: new Map(),
   sdkSessions: [],
   currentSessionId: getInitialSessionId(),
@@ -471,6 +538,8 @@ export const useStore = create<AppState>((set) => ({
       if (s.currentSessionId === sessionId) {
         localStorage.removeItem("cc-current-session");
       }
+      const sessionDrafts = deleteFromMap(s.sessionDrafts, sessionId);
+      persistDrafts(s.homeDraft, sessionDrafts);
       return {
         sessions: deleteFromMap(s.sessions, sessionId),
         messages: deleteFromMap(s.messages, sessionId),
@@ -493,6 +562,7 @@ export const useStore = create<AppState>((set) => ({
         prStatus: deleteFromMap(s.prStatus, sessionId),
         linkedLinearIssues: deleteFromMap(s.linkedLinearIssues, sessionId),
         chatTabReentryTickBySession: deleteFromMap(s.chatTabReentryTickBySession, sessionId),
+        sessionDrafts,
         sdkSessions: s.sdkSessions.filter((sdk) => sdk.sessionId !== sessionId),
         currentSessionId: s.currentSessionId === sessionId ? null : s.currentSessionId,
       };
@@ -761,6 +831,36 @@ export const useStore = create<AppState>((set) => ({
       return { diffPanelSelectedFile };
     }),
 
+  setHomeDraft: (text) =>
+    set((s) => {
+      const next = text ? { text, updatedAt: Date.now() } : null;
+      persistDrafts(next, s.sessionDrafts);
+      return { homeDraft: next };
+    }),
+  clearHomeDraft: () =>
+    set((s) => {
+      persistDrafts(null, s.sessionDrafts);
+      return { homeDraft: null };
+    }),
+  setSessionDraft: (sessionId, text) =>
+    set((s) => {
+      const sessionDrafts = new Map(s.sessionDrafts);
+      if (text) {
+        sessionDrafts.set(sessionId, { text, updatedAt: Date.now() });
+      } else {
+        sessionDrafts.delete(sessionId);
+      }
+      persistDrafts(s.homeDraft, sessionDrafts);
+      return { sessionDrafts };
+    }),
+  clearSessionDraft: (sessionId) =>
+    set((s) => {
+      const sessionDrafts = new Map(s.sessionDrafts);
+      sessionDrafts.delete(sessionId);
+      persistDrafts(s.homeDraft, sessionDrafts);
+      return { sessionDrafts };
+    }),
+
   setQuickTerminalOpen: (open) => set({ quickTerminalOpen: open }),
   openQuickTerminal: (opts) =>
     set((s) => {
@@ -830,7 +930,10 @@ export const useStore = create<AppState>((set) => ({
   openTerminal: (cwd) => set({ terminalOpen: true, terminalCwd: cwd }),
   closeTerminal: () => set({ terminalOpen: false, terminalCwd: null, terminalId: null }),
 
-  reset: () =>
+  reset: () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(DRAFTS_STORAGE_KEY);
+    }
     set({
       sessions: new Map(),
       sdkSessions: [],
@@ -868,5 +971,8 @@ export const useStore = create<AppState>((set) => ({
       terminalOpen: false,
       terminalCwd: null,
       terminalId: null,
-    }),
+      homeDraft: null,
+      sessionDrafts: new Map(),
+    });
+  },
 }));
