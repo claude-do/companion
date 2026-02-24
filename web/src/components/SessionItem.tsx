@@ -138,7 +138,7 @@ export function SessionItem({
           isActive
             ? "bg-cc-active"
             : "hover:bg-cc-hover"
-        }`}
+        } text-left`}
       >
         {/* Status dot */}
         {!isEditing && (

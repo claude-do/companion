@@ -4,14 +4,39 @@
  * in a single terminal. Ctrl+C kills both.
  */
 import { spawn, type Subprocess } from "bun";
+import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(__dirname);
+const requestedApiPort = Number(process.env.COMPANION_DEV_API_PORT || process.env.PORT || "3458");
+const requestedVitePort = Number(process.env.COMPANION_DEV_VITE_PORT || "5175");
+const devSessionDir = process.env.COMPANION_DEV_SESSION_DIR;
+const devRecordingsDir = process.env.COMPANION_DEV_RECORDINGS_DIR;
 
 const procs: Subprocess[] = [];
 let shuttingDown = false;
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function ensurePortAvailable(port: number, label: string): Promise<void> {
+  const available = await isPortAvailable(port);
+  if (!available) {
+    console.error(
+      `\x1b[31m[dev] ${label} port ${port} is already in use. Stop the stale process and rerun make dev.\x1b[0m`,
+    );
+    process.exit(1);
+  }
+}
 
 function prefix(
   name: string,
@@ -59,12 +84,29 @@ process.on("SIGINT", () => cleanup(0));
 process.on("SIGTERM", () => cleanup(0));
 
 async function start() {
+  const devApiPort = requestedApiPort;
+  const devVitePort = requestedVitePort;
+  await ensurePortAvailable(devApiPort, "Backend");
+  await ensurePortAvailable(devVitePort, "Vite");
+  console.log(
+    `\x1b[36m[dev] API: http://localhost:${devApiPort} | UI: http://localhost:${devVitePort}\x1b[0m`,
+  );
+
+  const backendEnv: Record<string, string> = {
+    ...process.env,
+    NODE_ENV: "development",
+    PORT: String(devApiPort),
+    COMPANION_DEV_VITE_PORT: String(devVitePort),
+  };
+  if (devSessionDir) backendEnv.COMPANION_SESSION_DIR = devSessionDir;
+  if (devRecordingsDir) backendEnv.COMPANION_RECORDINGS_DIR = devRecordingsDir;
+
   // ── Backend (Hono on Bun) ────────────────────────────────────────
   const backend = spawn(["bun", "--watch", "server/index.ts"], {
     cwd: webDir,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, NODE_ENV: "development" },
+    env: backendEnv,
   });
   procs.push(backend);
 
@@ -101,7 +143,12 @@ async function start() {
     cwd: webDir,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, NODE_ENV: "development" },
+    env: {
+      ...process.env,
+      NODE_ENV: "development",
+      VITE_PORT: String(devVitePort),
+      VITE_API_PORT: String(devApiPort),
+    },
   });
   procs.push(vite);
   prefix("vite", "\x1b[35m", vite.stdout);
