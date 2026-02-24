@@ -955,6 +955,10 @@ describe("CLI message routing", () => {
     const resultBroadcast = calls.find((c: any) => c.type === "result");
     expect(resultBroadcast).toBeDefined();
     expect(resultBroadcast.data.total_cost_usd).toBe(0.05);
+    const notifyBroadcast = calls.find((c: any) => c.type === "notification_event");
+    expect(notifyBroadcast).toBeDefined();
+    expect(notifyBroadcast.event.event_type).toBe("session_completed");
+    expect(notifyBroadcast.event.session_id).toBe("s1");
   });
 
   it("result: refreshes git branch and broadcasts session_update when branch changes", () => {
@@ -1081,6 +1085,10 @@ describe("CLI message routing", () => {
     expect(permBroadcast).toBeDefined();
     expect(permBroadcast.request.request_id).toBe("req-42");
     expect(permBroadcast.request.tool_name).toBe("Bash");
+    const notifyBroadcast = calls.find((c: any) => c.type === "notification_event");
+    expect(notifyBroadcast).toBeDefined();
+    expect(notifyBroadcast.event.event_type).toBe("permission_needed");
+    expect(notifyBroadcast.event.request_id).toBe("req-42");
   });
 
   it("tool_progress: broadcasts", () => {

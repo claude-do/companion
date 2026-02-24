@@ -216,6 +216,19 @@ export interface CLIAuthStatusMessage {
   session_id: string;
 }
 
+export type NotificationEventType = "session_completed" | "permission_needed";
+
+export interface NotificationEvent {
+  id: string;
+  event_type: NotificationEventType;
+  session_id: string;
+  title: string;
+  body: string;
+  timestamp: number;
+  request_id?: string;
+  tool_name?: string;
+}
+
 export interface CLIControlResponseMessage {
   type: "control_response";
   response: {
@@ -284,6 +297,7 @@ export type BrowserIncomingMessageBase =
   | { type: "permission_cancelled"; request_id: string }
   | { type: "tool_progress"; tool_use_id: string; tool_name: string; elapsed_time_seconds: number }
   | { type: "tool_use_summary"; summary: string; tool_use_ids: string[] }
+  | { type: "notification_event"; event: NotificationEvent }
   | { type: "status_change"; status: "compacting" | "idle" | "running" | null }
   | { type: "auth_status"; isAuthenticating: boolean; output: string[]; error?: string }
   | { type: "error"; message: string }

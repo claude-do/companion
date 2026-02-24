@@ -731,6 +731,80 @@ describe("handleMessage: permission_request", () => {
 });
 
 // ===========================================================================
+// handleMessage: notification_event
+// ===========================================================================
+describe("handleMessage: notification_event", () => {
+  it("shows desktop notifications and deep-links to the target session on click", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    useStore.getState().setNotificationDesktop(true);
+
+    const notifications: Array<{ onclick: null | (() => void) }> = [];
+    const notificationMock = vi.fn().mockImplementation(function notificationCtor() {
+      const instance = { onclick: null as null | (() => void) };
+      notifications.push(instance);
+      return instance;
+    });
+    (notificationMock as unknown as { permission: string }).permission = "granted";
+    vi.stubGlobal("Notification", notificationMock);
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => {});
+
+    fireMessage({
+      type: "notification_event",
+      event: {
+        id: "result:uuid-1",
+        event_type: "session_completed",
+        session_id: "s1",
+        title: "Session completed",
+        body: "Claude finished the task",
+        timestamp: Date.now(),
+      },
+    });
+
+    expect(notificationMock).toHaveBeenCalledWith(
+      "Session completed",
+      { body: "Claude finished the task", tag: "result:uuid-1" },
+    );
+
+    notifications[0].onclick?.();
+    expect(focusSpy).toHaveBeenCalled();
+    expect(window.location.hash).toBe("#/session/s1");
+  });
+
+  it("deduplicates repeated notification events with the same event id", () => {
+    wsModule.connectSession("s1");
+    fireMessage({ type: "session_init", session: makeSession("s1") });
+    useStore.getState().setNotificationDesktop(true);
+
+    const notificationMock = vi.fn().mockImplementation(function notificationCtor() {
+      return { onclick: null };
+    });
+    (notificationMock as unknown as { permission: string }).permission = "granted";
+    vi.stubGlobal("Notification", notificationMock);
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+
+    const event = {
+      type: "notification_event" as const,
+      event: {
+        id: "permission:req-1",
+        event_type: "permission_needed" as const,
+        session_id: "s1",
+        title: "Permission needed",
+        body: "Bash: approve or deny",
+        timestamp: Date.now(),
+        request_id: "req-1",
+        tool_name: "Bash",
+      },
+    };
+
+    fireMessage(event);
+    fireMessage(event);
+    expect(notificationMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
 // handleMessage: permission_cancelled
 // ===========================================================================
 describe("handleMessage: permission_cancelled", () => {

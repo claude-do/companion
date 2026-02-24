@@ -4,12 +4,14 @@ import { generateUniqueSessionName } from "./utils/names.js";
 import { playNotificationSound } from "./utils/notification-sound.js";
 
 const WS_RECONNECT_DELAY_MS = 2000;
+const NOTIFICATION_DEDUPE_WINDOW_MS = 15000;
 const sockets = new Map<string, WebSocket>();
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSeqBySession = new Map<string, number>();
 const taskCounters = new Map<string, number>();
 const streamingPhaseBySession = new Map<string, "thinking" | "text">();
 const streamingDraftMessageIdBySession = new Map<string, string>();
+const notificationLastSentAt = new Map<string, number>();
 /** Track processed tool_use IDs to prevent duplicate task creation */
 const processedToolUseIds = new Map<string, Set<string>>();
 
@@ -129,10 +131,29 @@ function extractChangedFilesFromBlocks(sessionId: string, blocks: ContentBlock[]
   if (dirty) store.bumpChangedFilesTick(sessionId);
 }
 
-function sendBrowserNotification(title: string, body: string, tag: string) {
+function shouldSendNotification(key: string): boolean {
+  const now = Date.now();
+  const lastSent = notificationLastSentAt.get(key);
+  if (typeof lastSent === "number" && now - lastSent < NOTIFICATION_DEDUPE_WINDOW_MS) {
+    return false;
+  }
+  notificationLastSentAt.set(key, now);
+  return true;
+}
+
+function sendBrowserNotification(title: string, body: string, tag: string, sessionId?: string) {
   if (typeof Notification === "undefined") return;
   if (Notification.permission !== "granted") return;
-  new Notification(title, { body, tag });
+  const note = new Notification(title, { body, tag });
+  if (!sessionId) return;
+  note.onclick = () => {
+    try {
+      window.focus();
+    } catch {
+      // ignore focus errors
+    }
+    window.location.hash = `#/session/${sessionId}`;
+  };
 }
 
 function summarizeSystemEvent(
@@ -551,9 +572,6 @@ function handleParsedMessage(
       if (!document.hasFocus() && store.notificationSound) {
         playNotificationSound();
       }
-      if (!document.hasFocus() && store.notificationDesktop) {
-        sendBrowserNotification("Session completed", "Claude finished the task", sessionId);
-      }
       if (r.is_error && r.errors?.length) {
         store.appendMessage(sessionId, {
           id: nextId(),
@@ -567,14 +585,6 @@ function handleParsedMessage(
 
     case "permission_request": {
       store.addPermission(sessionId, data.request);
-      if (!document.hasFocus() && store.notificationDesktop) {
-        const req = data.request;
-        sendBrowserNotification(
-          "Permission needed",
-          `${req.tool_name}: approve or deny`,
-          req.request_id,
-        );
-      }
       // Also extract tasks and changed files from permission requests
       const req = data.request;
       if (req.tool_name && req.input) {
@@ -586,6 +596,21 @@ function handleParsedMessage(
         }];
         extractTasksFromBlocks(sessionId, permBlocks);
         extractChangedFilesFromBlocks(sessionId, permBlocks);
+      }
+      break;
+    }
+
+    case "notification_event": {
+      if (!document.hasFocus() && store.notificationDesktop) {
+        const key = `${data.event.event_type}:${data.event.id}`;
+        if (shouldSendNotification(key)) {
+          sendBrowserNotification(
+            data.event.title,
+            data.event.body,
+            data.event.id,
+            data.event.session_id,
+          );
+        }
       }
       break;
     }

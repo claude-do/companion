@@ -15,6 +15,7 @@ import type {
   PermissionRequest,
   BackendType,
   McpServerConfig,
+  NotificationEvent,
 } from "./session-types.js";
 import type { SessionStore } from "./session-store.js";
 import type { CodexAdapter } from "./codex-adapter.js";
@@ -770,6 +771,20 @@ export class WsBridge {
     };
     session.messageHistory.push(browserMsg);
     this.broadcastToBrowsers(session, browserMsg);
+    if (!msg.is_error) {
+      const event: NotificationEvent = {
+        id: `result:${msg.uuid}`,
+        event_type: "session_completed",
+        session_id: session.id,
+        title: "Session completed",
+        body: "Claude finished the task",
+        timestamp: Date.now(),
+      };
+      this.broadcastToBrowsers(session, {
+        type: "notification_event",
+        event,
+      });
+    }
     this.persistSession(session);
 
     // Trigger auto-naming after the first successful result for this session.
@@ -815,6 +830,20 @@ export class WsBridge {
       this.broadcastToBrowsers(session, {
         type: "permission_request",
         request: perm,
+      });
+      const event: NotificationEvent = {
+        id: `permission:${msg.request_id}`,
+        event_type: "permission_needed",
+        session_id: session.id,
+        title: "Permission needed",
+        body: `${msg.request.tool_name}: approve or deny`,
+        timestamp: Date.now(),
+        request_id: msg.request_id,
+        tool_name: msg.request.tool_name,
+      };
+      this.broadcastToBrowsers(session, {
+        type: "notification_event",
+        event,
       });
       this.persistSession(session);
     }
