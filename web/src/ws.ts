@@ -4,9 +4,13 @@ import { generateUniqueSessionName } from "./utils/names.js";
 import { playNotificationSound } from "./utils/notification-sound.js";
 
 const WS_RECONNECT_DELAY_MS = 2000;
+const WS_HEARTBEAT_MS = 30000;
+const MAX_PENDING_OUTGOING_MESSAGES = 100;
 const NOTIFICATION_DEDUPE_WINDOW_MS = 15000;
 const sockets = new Map<string, WebSocket>();
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
+const pendingOutgoingBySession = new Map<string, BrowserOutgoingMessage[]>();
 const lastSeqBySession = new Map<string, number>();
 const taskCounters = new Map<string, number>();
 const streamingPhaseBySession = new Map<string, "thinking" | "text">();
@@ -317,6 +321,43 @@ function setLastSeq(sessionId: string, seq: number): void {
 
 function ackSeq(sessionId: string, seq: number): void {
   sendToSession(sessionId, { type: "session_ack", last_seq: seq });
+}
+
+function startHeartbeat(sessionId: string, ws: WebSocket): void {
+  stopHeartbeat(sessionId);
+  const timer = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const lastSeq = getLastSeq(sessionId);
+    ws.send(JSON.stringify({ type: "session_subscribe", last_seq: lastSeq }));
+  }, WS_HEARTBEAT_MS);
+  heartbeatTimers.set(sessionId, timer);
+}
+
+function stopHeartbeat(sessionId: string): void {
+  const timer = heartbeatTimers.get(sessionId);
+  if (!timer) return;
+  clearInterval(timer);
+  heartbeatTimers.delete(sessionId);
+}
+
+function queueOutgoingMessage(sessionId: string, msg: BrowserOutgoingMessage): void {
+  const queue = pendingOutgoingBySession.get(sessionId) || [];
+  queue.push(msg);
+  if (queue.length > MAX_PENDING_OUTGOING_MESSAGES) {
+    queue.splice(0, queue.length - MAX_PENDING_OUTGOING_MESSAGES);
+  }
+  pendingOutgoingBySession.set(sessionId, queue);
+}
+
+function flushOutgoingQueue(sessionId: string): void {
+  const ws = sockets.get(sessionId);
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const queue = pendingOutgoingBySession.get(sessionId);
+  if (!queue || queue.length === 0) return;
+  for (const msg of queue) {
+    ws.send(JSON.stringify(msg));
+  }
+  pendingOutgoingBySession.delete(sessionId);
 }
 
 function extractTextFromBlocks(blocks: ContentBlock[]): string {
@@ -838,17 +879,24 @@ export function connectSession(sessionId: string) {
       clearTimeout(timer);
       reconnectTimers.delete(sessionId);
     }
+    startHeartbeat(sessionId, ws);
+    flushOutgoingQueue(sessionId);
   };
 
   ws.onmessage = (event) => handleMessage(sessionId, event);
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     sockets.delete(sessionId);
+    stopHeartbeat(sessionId);
     useStore.getState().setConnectionStatus(sessionId, "disconnected");
+    console.warn(
+      `[ws] Socket closed for session ${sessionId}: code=${event.code} reason="${event.reason || ""}" clean=${event.wasClean}`,
+    );
     scheduleReconnect(sessionId);
   };
 
   ws.onerror = () => {
+    console.warn(`[ws] Socket error for session ${sessionId}`);
     ws.close();
   };
 }
@@ -878,6 +926,8 @@ export function disconnectSession(sessionId: string) {
     ws.close();
     sockets.delete(sessionId);
   }
+  stopHeartbeat(sessionId);
+  pendingOutgoingBySession.delete(sessionId);
   processedToolUseIds.delete(sessionId);
   taskCounters.delete(sessionId);
   streamingPhaseBySession.delete(sessionId);
@@ -938,6 +988,11 @@ export function sendToSession(sessionId: string, msg: BrowserOutgoingMessage) {
   }
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(outgoing));
+    return;
+  }
+  if (IDEMPOTENT_OUTGOING_TYPES.has(outgoing.type)) {
+    queueOutgoingMessage(sessionId, outgoing);
+    connectSession(sessionId);
   }
 }
 

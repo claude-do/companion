@@ -126,6 +126,18 @@ describe("connectSession", () => {
       JSON.stringify({ type: "session_subscribe", last_seq: 12 }),
     );
   });
+
+  it("sends heartbeat session_subscribe after connect", () => {
+    wsModule.connectSession("s1");
+    lastWs.onopen?.(new Event("open"));
+    lastWs.send.mockClear();
+
+    vi.advanceTimersByTime(30000);
+
+    expect(lastWs.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "session_subscribe", last_seq: 0 }),
+    );
+  });
 });
 
 // ===========================================================================
@@ -144,9 +156,9 @@ describe("sendToSession", () => {
     expect(typeof payload.client_msg_id).toBe("string");
   });
 
-  it("does nothing when session has no socket", () => {
-    // Should not throw
+  it("queues idempotent control messages when session has no socket and connects", () => {
     wsModule.sendToSession("nonexistent", { type: "interrupt" });
+    expect(lastWs.url).toBe("ws://localhost:3456/ws/browser/nonexistent");
   });
 
   it("preserves provided client_msg_id", () => {
@@ -168,6 +180,26 @@ describe("sendToSession", () => {
     const payload = JSON.parse(lastWs.send.mock.calls[0][0]);
     expect(payload.type).toBe("interrupt");
     expect(typeof payload.client_msg_id).toBe("string");
+  });
+
+  it("queues idempotent messages while socket is not open and flushes on open", () => {
+    wsModule.connectSession("s1");
+    lastWs.readyState = MockWebSocket.CONNECTING;
+
+    wsModule.sendToSession("s1", { type: "interrupt" });
+    expect(lastWs.send).not.toHaveBeenCalled();
+
+    lastWs.readyState = MockWebSocket.OPEN;
+    lastWs.onopen?.(new Event("open"));
+
+    expect(lastWs.send).toHaveBeenCalledTimes(2);
+    expect(lastWs.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ type: "session_subscribe", last_seq: 0 }),
+    );
+    const flushed = JSON.parse(lastWs.send.mock.calls[1][0]);
+    expect(flushed.type).toBe("interrupt");
+    expect(typeof flushed.client_msg_id).toBe("string");
   });
 });
 
