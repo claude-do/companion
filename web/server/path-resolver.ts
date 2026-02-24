@@ -46,6 +46,7 @@ export function captureUserShellPath(): string {
  */
 export function buildFallbackPath(): string {
   const home = homedir();
+  const xdgDataHome = process.env.XDG_DATA_HOME || join(home, ".local", "share");
   const candidates = [
     // Standard system paths
     "/opt/homebrew/bin",
@@ -77,6 +78,10 @@ export function buildFallbackPath(): string {
 
   // Probe nvm-managed node versions
   const nvmDir = process.env.NVM_DIR || join(home, ".nvm");
+  const nvmBin = process.env.NVM_BIN;
+  if (nvmBin && existsSync(nvmBin)) {
+    candidates.push(nvmBin);
+  }
   const nvmVersionsDir = join(nvmDir, "versions", "node");
   if (existsSync(nvmVersionsDir)) {
     try {
@@ -86,14 +91,32 @@ export function buildFallbackPath(): string {
     } catch { /* ignore */ }
   }
 
-  // fnm (Fast Node Manager) — versions stored in fnm multishell or XDG data
-  const fnmDir = join(home, "Library", "Application Support", "fnm", "node-versions");
-  if (existsSync(fnmDir)) {
-    try {
-      for (const v of readdirSync(fnmDir)) {
-        candidates.push(join(fnmDir, v, "installation", "bin"));
-      }
-    } catch { /* ignore */ }
+  // fnm (Fast Node Manager) — support Linux and macOS default layouts.
+  const fnmBaseDirs = [
+    process.env.FNM_PATH,
+    process.env.FNM_DIR,
+    process.env.FNM_MULTISHELL_PATH,
+    join(xdgDataHome, "fnm"),
+    join(home, ".fnm"),
+    join(home, "Library", "Application Support", "fnm"),
+  ].filter((v): v is string => !!v);
+
+  for (const base of fnmBaseDirs) {
+    // fnm default alias target (stable symlink-style entry)
+    const aliasDefaultBin = join(base, "aliases", "default", "bin");
+    if (existsSync(aliasDefaultBin)) {
+      candidates.push(aliasDefaultBin);
+    }
+
+    // fnm node-versions layout
+    const fnmVersionsDir = join(base, "node-versions");
+    if (existsSync(fnmVersionsDir)) {
+      try {
+        for (const v of readdirSync(fnmVersionsDir)) {
+          candidates.push(join(fnmVersionsDir, v, "installation", "bin"));
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   return [...new Set(candidates.filter((dir) => existsSync(dir)))].join(":");
