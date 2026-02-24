@@ -181,3 +181,9 @@ gh pr edit --body-file /tmp/pr_body.md
 ## Codex & Claude Code
 - All features must be compatible with both Codex and Claude Code. If a feature is only compatible with one, it must be gated behind a clear UI affordance (e.g. "This feature requires Claude Code") and the incompatible option should be hidden or disabled.
 - When implementing a new feature, always consider how it will work with both models and test with both if possible. If a feature is only implemented for one model, document that clearly in the code and in the UI.
+
+## Fork-Only Workflow
+- Default all pushes to `origin` (our fork).
+- Default all pull requests to our fork repository.
+- Do not open pull requests against `upstream` unless explicitly requested.
+- Do not push branches to `upstream` unless explicitly requested.
