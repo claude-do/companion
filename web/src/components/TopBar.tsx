@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useStore } from "../store.js";
 import { parseHash } from "../utils/routing.js";
+import { isDevUi } from "../utils/runtime-mode.js";
 
 type WorkspaceTab = "chat" | "diff" | "terminal" | "editor";
 
@@ -124,7 +125,7 @@ export function TopBar() {
   }, [showWorkspaceControls, workspaceTabs, activeTab, cwd, quickTerminalOpen, quickTerminalTabs.length, openQuickTerminal, defaultTerminalOpts, setActiveTab, markChatTabReentry, currentSessionId]);
 
   return (
-    <header className="relative shrink-0 h-11 px-4 bg-cc-bg border-b border-cc-separator">
+    <header className={`relative shrink-0 h-11 px-4 border-b border-cc-separator ${isDevUi ? "bg-[bisque]" : "bg-cc-bg"}`}>
       <div className="h-full flex items-center gap-1 min-w-0">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -136,6 +137,11 @@ export function TopBar() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v18" />
           </svg>
         </button>
+        {isDevUi && (
+          <span className="px-1.5 py-0.5 rounded border text-[10px] font-semibold leading-none bg-[crimson]/10 text-[crimson] border-[crimson]/35">
+            DEV
+          </span>
+        )}
 
         {showWorkspaceControls && (
           <div className="flex-1 flex items-center justify-center gap-0.5 min-w-0">

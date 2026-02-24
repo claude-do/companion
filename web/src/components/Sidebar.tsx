@@ -6,6 +6,7 @@ import { navigateToSession, navigateHome, parseHash } from "../utils/routing.js"
 import { ProjectGroup } from "./ProjectGroup.js";
 import { SessionItem } from "./SessionItem.js";
 import { groupSessionsByProject, type SessionItem as SessionItemType } from "../utils/project-grouping.js";
+import { isDevUi } from "../utils/runtime-mode.js";
 
 interface NavItem {
   id: string;
@@ -324,9 +325,11 @@ export function Sidebar() {
     <aside className="w-[260px] h-full flex flex-col bg-cc-sidebar border-r border-cc-border">
       {/* Header */}
       <div className="p-3.5 pb-2">
-        <div className="flex items-center gap-2.5">
+        <div className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 ${isDevUi ? "bg-[darkred]" : ""}`}>
           <img src={logoSrc} alt="" className="w-6 h-6" />
-          <span className="text-[13px] font-semibold text-cc-fg tracking-tight">The Companion</span>
+          <span className={`text-[13px] font-semibold tracking-tight ${isDevUi ? "text-[snow]" : "text-cc-fg"}`}>
+            The Companion{isDevUi ? <> <span className="text-[crimson]">DEV</span></> : ""}
+          </span>
           <button
             onClick={handleNewSession}
             title="New Session"
