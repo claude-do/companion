@@ -41,6 +41,9 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const cliConnected = useStore((s) => s.cliConnected);
   const sessionData = useStore((s) => s.sessions.get(sessionId));
   const previousMode = useStore((s) => s.previousPermissionMode.get(sessionId) || "acceptEdits");
+  const sessionDraftText = useStore((s) => s.sessionDrafts.get(sessionId)?.text ?? "");
+  const setSessionDraft = useStore((s) => s.setSessionDraft);
+  const clearSessionDraft = useStore((s) => s.clearSessionDraft);
 
   const isConnected = cliConnected.get(sessionId) ?? false;
   const currentMode = sessionData?.permissionMode || "acceptEdits";
@@ -48,6 +51,10 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const isCodex = sessionData?.backend_type === "codex";
   const modes: ModeOption[] = isCodex ? CODEX_MODES : CLAUDE_MODES;
   const modeLabel = modes.find((m) => m.value === currentMode)?.label?.toLowerCase() || currentMode;
+
+  useEffect(() => {
+    setText(sessionDraftText);
+  }, [sessionId, sessionDraftText]);
 
   const refreshPrompts = useCallback(async () => {
     setPromptsLoading(true);
@@ -176,10 +183,12 @@ export function Composer({ sessionId }: { sessionId: string }) {
   }, [text]);
 
   const selectCommand = useCallback((cmd: CommandItem) => {
-    setText(`/${cmd.name} `);
+    const nextText = `/${cmd.name} `;
+    setText(nextText);
+    setSessionDraft(sessionId, nextText);
     setSlashMenuOpen(false);
     textareaRef.current?.focus();
-  }, []);
+  }, [sessionId, setSessionDraft]);
 
   const selectPrompt = useCallback((prompt: SavedPrompt) => {
     if (!mentionContext) return;
@@ -188,10 +197,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
     const nextCursor = mentionContext.start + insertion.length;
     pendingSelectionRef.current = nextCursor;
     setText(nextText);
+    setSessionDraft(sessionId, nextText);
     setMentionMenuOpen(false);
     setCaretPos(nextCursor);
     textareaRef.current?.focus();
-  }, [mentionContext, text]);
+  }, [mentionContext, sessionId, setSessionDraft, text]);
 
   function handleSend() {
     const msg = text.trim();
@@ -213,6 +223,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
     });
 
     setText("");
+    clearSessionDraft(sessionId);
     setImages([]);
     setSlashMenuOpen(false);
     setMentionMenuOpen(false);
@@ -300,7 +311,9 @@ export function Composer({ sessionId }: { sessionId: string }) {
   }
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value);
+    const nextText = e.target.value;
+    setText(nextText);
+    setSessionDraft(sessionId, nextText);
     setCaretPos(e.target.selectionStart ?? e.target.value.length);
     const ta = e.target;
     ta.style.height = "auto";

@@ -30,6 +30,8 @@ vi.mock("../api.js", () => ({
 const mockAppendMessage = vi.fn();
 const mockUpdateSession = vi.fn();
 const mockSetPreviousPermissionMode = vi.fn();
+const mockSetSessionDraft = vi.fn();
+const mockClearSessionDraft = vi.fn();
 
 vi.mock("../store.js", () => {
   // Create a mock store function that acts like zustand's useStore
@@ -75,11 +77,13 @@ function setupMockStore(overrides: {
   isConnected?: boolean;
   sessionStatus?: "idle" | "running" | "compacting" | null;
   session?: Partial<SessionState>;
+  sessionDrafts?: Map<string, { text: string; updatedAt: number }>;
 } = {}) {
   const {
     isConnected = true,
     sessionStatus = "idle",
     session = {},
+    sessionDrafts = new Map<string, { text: string; updatedAt: number }>(),
   } = overrides;
 
   const sessionsMap = new Map<string, SessionState>();
@@ -99,6 +103,19 @@ function setupMockStore(overrides: {
     cliConnected: cliConnectedMap,
     sessionStatus: sessionStatusMap,
     previousPermissionMode: previousPermissionModeMap,
+    sessionDrafts,
+    setSessionDraft: (sessionId: string, text: string) => {
+      mockSetSessionDraft(sessionId, text);
+      if (text) {
+        sessionDrafts.set(sessionId, { text, updatedAt: Date.now() });
+      } else {
+        sessionDrafts.delete(sessionId);
+      }
+    },
+    clearSessionDraft: (sessionId: string) => {
+      mockClearSessionDraft(sessionId);
+      sessionDrafts.delete(sessionId);
+    },
     appendMessage: mockAppendMessage,
     updateSession: mockUpdateSession,
     setPreviousPermissionMode: mockSetPreviousPermissionMode,
@@ -207,6 +224,51 @@ describe("Composer sending messages", () => {
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
 
     expect(textarea.value).toBe("");
+  });
+
+  it("clears the session draft after sending", () => {
+    const { container } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")!;
+
+    fireEvent.change(textarea, { target: { value: "clear draft on send" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
+
+    expect(mockClearSessionDraft).toHaveBeenCalledWith("s1");
+  });
+});
+
+describe("Composer drafts", () => {
+  it("initializes textarea with an existing session draft", () => {
+    const draftMap = new Map<string, { text: string; updatedAt: number }>();
+    draftMap.set("s1", { text: "restored draft", updatedAt: Date.now() });
+    setupMockStore({ sessionDrafts: draftMap });
+
+    const { container } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement;
+    expect(textarea.value).toBe("restored draft");
+  });
+
+  it("updates session draft when typing", () => {
+    const { container } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")!;
+
+    fireEvent.change(textarea, { target: { value: "draft update text" } });
+    expect(mockSetSessionDraft).toHaveBeenCalledWith("s1", "draft update text");
+  });
+
+  it("uses per-session drafts when switching sessions", () => {
+    const draftMap = new Map<string, { text: string; updatedAt: number }>([
+      ["s1", { text: "draft one", updatedAt: Date.now() }],
+      ["s2", { text: "draft two", updatedAt: Date.now() }],
+    ]);
+    setupMockStore({ sessionDrafts: draftMap });
+
+    const { container, rerender } = render(<Composer sessionId="s1" />);
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement;
+    expect(textarea.value).toBe("draft one");
+
+    rerender(<Composer sessionId="s2" />);
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("draft two");
   });
 });
 

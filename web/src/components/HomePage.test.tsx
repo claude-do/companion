@@ -22,6 +22,9 @@ const { mockApi, createSessionStreamMock, mockStoreState, mockStoreGetState } = 
   mockStoreState: {
     setCurrentSession: vi.fn(),
     currentSessionId: null as string | null,
+    homeDraft: null as { text: string; updatedAt: number } | null,
+    setHomeDraft: vi.fn(),
+    clearHomeDraft: vi.fn(),
   },
   mockStoreGetState: vi.fn(() => ({})),
 }));
@@ -57,6 +60,9 @@ describe("HomePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mockStoreState.homeDraft = null;
+    mockStoreState.setHomeDraft = vi.fn();
+    mockStoreState.clearHomeDraft = vi.fn();
     mockStoreGetState.mockReturnValue({
       clearCreation: vi.fn(),
       setSessionCreating: vi.fn(),
@@ -175,6 +181,30 @@ describe("HomePage", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("updates home draft through store when typing in textarea", async () => {
+    render(<HomePage />);
+    const textarea = await screen.findByPlaceholderText("Fix a bug, build a feature, refactor code...");
+    fireEvent.change(textarea, { target: { value: "Draft request text" } });
+    expect(mockStoreState.setHomeDraft).toHaveBeenCalledWith("Draft request text");
+  });
+
+  it("clears the home draft after successful session creation", async () => {
+    createSessionStreamMock.mockResolvedValue({
+      sessionId: "session-draft-clear",
+      state: "starting",
+      cwd: "/repo",
+    });
+    mockStoreState.homeDraft = { text: "Ship this fix", updatedAt: Date.now() };
+    render(<HomePage />);
+
+    const send = await screen.findByRole("button", { name: /send message/i });
+    fireEvent.click(send);
+
+    await waitFor(() => {
+      expect(mockStoreState.clearHomeDraft).toHaveBeenCalled();
+    });
   });
 
   it("detects external Claude sessions and supports row actions", async () => {
