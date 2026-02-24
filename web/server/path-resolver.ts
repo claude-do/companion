@@ -92,10 +92,16 @@ export function buildFallbackPath(): string {
   }
 
   // fnm (Fast Node Manager) — support Linux and macOS default layouts.
+  // FNM_MULTISHELL_PATH points to the active session's multishell directory
+  // (e.g. /tmp/fnm_multishells/<pid>/); its `bin/` sub-path contains the active node.
+  const fnmMultishellPath = process.env.FNM_MULTISHELL_PATH;
+  if (fnmMultishellPath) {
+    candidates.push(join(fnmMultishellPath, "bin"));
+  }
+
   const fnmBaseDirs = [
     process.env.FNM_PATH,
     process.env.FNM_DIR,
-    process.env.FNM_MULTISHELL_PATH,
     join(xdgDataHome, "fnm"),
     join(home, ".fnm"),
     join(home, "Library", "Application Support", "fnm"),

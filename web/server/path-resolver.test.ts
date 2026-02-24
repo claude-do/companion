@@ -197,6 +197,90 @@ describe("buildFallbackPath", () => {
     expect(result).toContain("/custom/nvm/versions/node/v20.0.0/bin");
   });
 
+  it("uses NVM_BIN env var when set and directory exists", () => {
+    // NVM_BIN is set directly to the active nvm node's bin directory.
+    process.env.NVM_BIN = "/home/testuser/.nvm/versions/node/v20.0.0/bin";
+    delete process.env.NVM_DIR;
+    mockExistsSync.mockImplementation((p: string) =>
+      p === "/home/testuser/.nvm/versions/node/v20.0.0/bin",
+    );
+    // Ensure no versions directory is scanned (default nvm path absent)
+    mockReaddirSync.mockReturnValue([] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain("/home/testuser/.nvm/versions/node/v20.0.0/bin");
+  });
+
+  it("uses FNM_MULTISHELL_PATH bin/ as a direct candidate", () => {
+    // FNM_MULTISHELL_PATH points to a temp multishell dir; its bin/ contains the active node.
+    process.env.FNM_MULTISHELL_PATH = "/tmp/fnm_multishells/12345";
+    mockExistsSync.mockImplementation((p: string) =>
+      p === "/tmp/fnm_multishells/12345/bin",
+    );
+    mockReaddirSync.mockReturnValue([] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain("/tmp/fnm_multishells/12345/bin");
+  });
+
+  it("uses FNM_DIR env var as base for node-versions scan", () => {
+    process.env.FNM_DIR = "/home/testuser/.local/share/fnm";
+    mockExistsSync.mockImplementation((p: string) => {
+      if (p === "/home/testuser/.local/share/fnm/node-versions") return true;
+      if (
+        p.includes("/home/testuser/.local/share/fnm/node-versions/v") &&
+        p.endsWith("/installation/bin")
+      )
+        return true;
+      return false;
+    });
+    mockReaddirSync.mockReturnValue(["v20.0.0"] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain(
+      "/home/testuser/.local/share/fnm/node-versions/v20.0.0/installation/bin",
+    );
+  });
+
+  it("uses fnm aliases/default/bin when it exists (FNM_PATH)", () => {
+    process.env.FNM_PATH = "/home/testuser/.fnm";
+    mockExistsSync.mockImplementation((p: string) =>
+      p === "/home/testuser/.fnm/aliases/default/bin",
+    );
+    mockReaddirSync.mockReturnValue([] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain("/home/testuser/.fnm/aliases/default/bin");
+  });
+
+  it("probes Linux default fnm directory (~/.local/share/fnm)", () => {
+    delete process.env.FNM_DIR;
+    delete process.env.FNM_PATH;
+    // XDG_DATA_HOME not set → defaults to ~/.local/share
+    delete process.env.XDG_DATA_HOME;
+    mockExistsSync.mockImplementation((p: string) =>
+      p === "/home/testuser/.local/share/fnm/aliases/default/bin",
+    );
+    mockReaddirSync.mockReturnValue([] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain(
+      "/home/testuser/.local/share/fnm/aliases/default/bin",
+    );
+  });
+
+  it("probes Linux default fnm directory (~/.fnm)", () => {
+    delete process.env.FNM_DIR;
+    delete process.env.FNM_PATH;
+    mockExistsSync.mockImplementation((p: string) =>
+      p === "/home/testuser/.fnm/aliases/default/bin",
+    );
+    mockReaddirSync.mockReturnValue([] as any);
+
+    const result = buildFallbackPath();
+    expect(result).toContain("/home/testuser/.fnm/aliases/default/bin");
+  });
+
   it("excludes directories that don't exist", () => {
     mockExistsSync.mockReturnValue(false);
 
